@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meeting Solo — Live Captions &amp; Transcript</title>
-  <meta name="description" content="Real-time live captions and copyable, persistent transcripts for interviews and meetings. English &amp; Chinese." />
+  <title>Meeting Solo — Live Captions, Translation &amp; Transcript</title>
+  <meta name="description" content="Real-time live captions with English⇄Chinese translation and speaker labels. Copyable, persistent transcripts for interviews and meetings." />
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>" />
 </head>
@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true">🎙️</span>
       <div class="brand-text">
         <h1>Meeting Solo</h1>
-        <p>Live captions &amp; transcript for interviews and meetings</p>
+        <p>Live captions, translation &amp; transcript for interviews and meetings</p>
       </div>
     </div>
     <div class="status" id="status">
@@ -44,6 +44,10 @@
 
       <div class="controls-spacer"></div>
 
+      <label class="toggle" title="Translate each line between English and Chinese">
+        <input type="checkbox" id="translateToggle" />
+        <span>Translate ⇄</span>
+      </label>
       <label class="toggle" title="Add a timestamp to each new line">
         <input type="checkbox" id="timestampToggle" />
         <span>Timestamps</span>
@@ -52,6 +56,14 @@
       <button id="copyBtn" class="btn" type="button" disabled>Copy</button>
       <button id="exportBtn" class="btn" type="button" disabled>Export</button>
       <button id="clearBtn" class="btn btn-danger" type="button" disabled>Clear</button>
+    </section>
+
+    <!-- Speakers -->
+    <section class="speaker-bar" aria-label="Speakers">
+      <span class="speaker-bar-label">Speaker</span>
+      <div id="speakerChips" class="speaker-chips"></div>
+      <button id="addSpeakerBtn" class="btn btn-sm" type="button" title="Add another speaker">+ Add</button>
+      <span class="speaker-hint">click to set who's talking · double-click to rename · keys 1–9</span>
     </section>
 
     <!-- Live caption bar -->
@@ -79,7 +91,7 @@
   </main>
 
   <footer class="app-footer">
-    <span>Your transcript is saved automatically in this browser and is never uploaded by this app.</span>
+    <span>Your transcript is saved locally in this browser. Speech recognition — and translation, when enabled — are processed by your browser's online services.</span>
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

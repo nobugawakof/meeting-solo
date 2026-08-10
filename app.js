@@ -1,40 +1,57 @@
-/* Meeting Solo — Live Captions & Transcript
+/* Meeting Solo — Live Captions, Translation & Transcript
  *
- * Real-time speech-to-text using the browser's Web Speech API.
- * Fixes the three flaws of Windows Live Captions:
- *   1. Unlimited transcript — every finalized line is kept.
- *   2. Copyable & exportable — copy to clipboard or download as a file.
- *   3. Persistent — auto-saved to localStorage, survives closing the app.
+ * Real-time speech-to-text using the browser's Web Speech API, with:
+ *   - Unlimited transcript (every finalized line is kept)
+ *   - Copy & export (clipboard / .txt download)
+ *   - Persistence (auto-saved to localStorage)
+ *   - Live English <-> Chinese translation (public translation services)
+ *   - Manual speaker labels (color-coded, renamable)
  */
 
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "meeting-solo.transcript.v1";
+  const STORAGE_KEY = "meeting-solo.state.v2";
+  const LEGACY_KEY = "meeting-solo.transcript.v1";
   const PREFS_KEY = "meeting-solo.prefs.v1";
+
+  const SPEAKER_COLORS = [
+    "#2563eb", "#db2777", "#16a34a", "#d97706",
+    "#7c3aed", "#0891b2", "#dc2626", "#4b5563",
+  ];
+  const MAX_SPEAKERS = 9;
 
   // --- DOM references ---
   const el = {
     recordBtn: document.getElementById("recordBtn"),
     recordBtnLabel: document.getElementById("recordBtnLabel"),
     langSelect: document.getElementById("langSelect"),
+    translateToggle: document.getElementById("translateToggle"),
     timestampToggle: document.getElementById("timestampToggle"),
     copyBtn: document.getElementById("copyBtn"),
     exportBtn: document.getElementById("exportBtn"),
     clearBtn: document.getElementById("clearBtn"),
+    speakerChips: document.getElementById("speakerChips"),
+    addSpeakerBtn: document.getElementById("addSpeakerBtn"),
     liveCaption: document.getElementById("liveCaption"),
     transcript: document.getElementById("transcript"),
     stats: document.getElementById("stats"),
     status: document.getElementById("status"),
-    statusDot: document.getElementById("statusDot"),
     statusText: document.getElementById("statusText"),
     unsupported: document.getElementById("unsupported"),
     toast: document.getElementById("toast"),
   };
 
   // --- State ---
-  /** @type {{time:string, text:string}[]} */
+  /** @type {{time:string, text:string, speaker:string, lang:string, translation:?string, _node?:Element, _translating?:boolean, _failed?:boolean}[]} */
   let lines = [];
+  let speakers = [
+    { id: "s1", name: "Speaker 1", color: SPEAKER_COLORS[0] },
+    { id: "s2", name: "Speaker 2", color: SPEAKER_COLORS[1] },
+  ];
+  let activeSpeakerId = "s1";
+  let speakerSeq = 2;
+
   let recognition = null;
   let recording = false;
   let stoppedByUser = false;
@@ -44,22 +61,51 @@
   // Persistence
   // ---------------------------------------------------------------------------
   function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) lines = JSON.parse(raw) || [];
-    } catch (_) { lines = []; }
+    let loaded = null;
+    try { loaded = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch (_) {}
+
+    if (loaded && Array.isArray(loaded.speakers) && loaded.speakers.length) {
+      lines = Array.isArray(loaded.lines) ? loaded.lines : [];
+      speakers = loaded.speakers;
+      activeSpeakerId = loaded.activeSpeakerId || speakers[0].id;
+      speakerSeq = loaded.speakerSeq || speakers.length;
+    } else {
+      // Migrate legacy v1 (a plain array of {time, text}).
+      try {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
+        if (Array.isArray(legacy)) lines = legacy;
+      } catch (_) {}
+    }
+
+    // Ensure every line has valid fields.
+    for (const line of lines) {
+      if (!line.speaker || !speakers.some((s) => s.id === line.speaker)) {
+        line.speaker = speakers[0].id;
+      }
+      if (!line.lang) line.lang = "en-US";
+      if (!("translation" in line)) line.translation = null;
+    }
+    if (!speakers.some((s) => s.id === activeSpeakerId)) activeSpeakerId = speakers[0].id;
 
     try {
       const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
       if (prefs.lang) el.langSelect.value = prefs.lang;
       if (typeof prefs.timestamps === "boolean") el.timestampToggle.checked = prefs.timestamps;
-    } catch (_) { /* ignore */ }
+      if (typeof prefs.translate === "boolean") el.translateToggle.checked = prefs.translate;
+    } catch (_) {}
   }
 
   function saveState() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(lines));
-    } catch (_) { /* storage may be full or blocked */ }
+      const cleanLines = lines.map((l) => ({
+        time: l.time, text: l.text, speaker: l.speaker,
+        lang: l.lang, translation: l.translation || null,
+      }));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ lines: cleanLines, speakers, activeSpeakerId, speakerSeq })
+      );
+    } catch (_) {}
   }
 
   function savePrefs() {
@@ -67,8 +113,147 @@
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         lang: el.langSelect.value,
         timestamps: el.timestampToggle.checked,
+        translate: el.translateToggle.checked,
       }));
-    } catch (_) { /* ignore */ }
+    } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // Speakers
+  // ---------------------------------------------------------------------------
+  function getSpeaker(id) {
+    return speakers.find((s) => s.id === id) || speakers[0];
+  }
+
+  function renderSpeakerChips() {
+    el.speakerChips.innerHTML = "";
+    for (let i = 0; i < speakers.length; i++) {
+      const s = speakers[i];
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip" + (s.id === activeSpeakerId ? " is-active" : "");
+      chip.dataset.id = s.id;
+      chip.title = `Set active speaker (key ${i + 1}) · double-click to rename`;
+      if (s.id === activeSpeakerId) {
+        chip.style.background = s.color;
+        chip.style.borderColor = s.color;
+      } else {
+        chip.style.background = "";
+        chip.style.borderColor = "";
+      }
+
+      const dot = document.createElement("span");
+      dot.className = "chip-dot";
+      dot.style.background = s.id === activeSpeakerId ? "#fff" : s.color;
+      chip.appendChild(dot);
+
+      const name = document.createElement("span");
+      name.textContent = s.name;
+      chip.appendChild(name);
+
+      chip.addEventListener("click", () => setActiveSpeaker(s.id));
+      chip.addEventListener("dblclick", (e) => { e.preventDefault(); renameSpeaker(s.id); });
+      el.speakerChips.appendChild(chip);
+    }
+    el.addSpeakerBtn.disabled = speakers.length >= MAX_SPEAKERS;
+  }
+
+  function setActiveSpeaker(id) {
+    activeSpeakerId = id;
+    renderSpeakerChips();
+    saveState();
+  }
+
+  function addSpeaker() {
+    if (speakers.length >= MAX_SPEAKERS) return;
+    speakerSeq += 1;
+    const idx = speakers.length;
+    speakers.push({
+      id: "s" + speakerSeq,
+      name: "Speaker " + (idx + 1),
+      color: SPEAKER_COLORS[idx % SPEAKER_COLORS.length],
+    });
+    renderSpeakerChips();
+    saveState();
+  }
+
+  function renameSpeaker(id) {
+    const s = getSpeaker(id);
+    const name = window.prompt("Speaker name:", s.name);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    s.name = trimmed;
+    renderSpeakerChips();
+    renderTranscript();
+    saveState();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Translation
+  // ---------------------------------------------------------------------------
+  function translationPair(lang) {
+    // English <-> Chinese, direction chosen by the captured language.
+    if (lang && lang.toLowerCase().indexOf("zh") === 0) {
+      return { src: "zh-CN", tgt: "en" };
+    }
+    return { src: "en", tgt: "zh-CN" };
+  }
+
+  async function translateText(text, src, tgt) {
+    // Primary: Google's free gtx endpoint (fast, good quality).
+    try {
+      const u =
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=" +
+        encodeURIComponent(src) + "&tl=" + encodeURIComponent(tgt) +
+        "&dt=t&q=" + encodeURIComponent(text);
+      const r = await fetch(u);
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d) && Array.isArray(d[0])) {
+          const out = d[0].map((seg) => (seg && seg[0]) ? seg[0] : "").join("");
+          if (out.trim()) return out;
+        }
+      }
+    } catch (_) {}
+
+    // Fallback: MyMemory (CORS-friendly, no key).
+    try {
+      const u =
+        "https://api.mymemory.translated.net/get?q=" +
+        encodeURIComponent(text) + "&langpair=" + encodeURIComponent(src + "|" + tgt);
+      const r = await fetch(u);
+      if (r.ok) {
+        const d = await r.json();
+        const out = d && d.responseData && d.responseData.translatedText;
+        if (out && !/^MYMEMORY WARNING/i.test(out)) return out;
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  async function translateLine(line) {
+    if (!el.translateToggle.checked) return;
+    const pair = translationPair(line.lang);
+    line._translating = true;
+    line._failed = false;
+    updateLineNode(line);
+
+    const out = await translateText(line.text, pair.src, pair.tgt);
+    line._translating = false;
+    line.translation = out;
+    line._failed = !out;
+    updateLineNode(line);
+    saveState();
+  }
+
+  async function translateMissing() {
+    for (const line of lines) {
+      if (!el.translateToggle.checked) break;
+      if (line.translation) continue;
+      await translateLine(line);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -76,34 +261,75 @@
   // ---------------------------------------------------------------------------
   function nowLabel() {
     const d = new Date();
-    const h = String(d.getHours()).padStart(2, "0");
-    const m = String(d.getMinutes()).padStart(2, "0");
-    const s = String(d.getSeconds()).padStart(2, "0");
-    return `${h}:${m}:${s}`;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  function buildLineNode(line) {
+    const speaker = getSpeaker(line.speaker);
+    const row = document.createElement("div");
+    row.className = "line";
+    row.style.borderLeftColor = speaker.color;
+
+    if (el.timestampToggle.checked && line.time) {
+      const t = document.createElement("span");
+      t.className = "line-time";
+      t.textContent = line.time;
+      row.appendChild(t);
+    }
+
+    const body = document.createElement("div");
+    body.className = "line-body";
+
+    const sp = document.createElement("span");
+    sp.className = "line-speaker";
+    sp.style.color = speaker.color;
+    sp.textContent = speaker.name + ":";
+    body.appendChild(sp);
+
+    const txt = document.createElement("span");
+    txt.className = "line-text";
+    txt.textContent = line.text;
+    body.appendChild(txt);
+
+    if (el.translateToggle.checked && (line.translation || line._translating || line._failed)) {
+      const tr = document.createElement("div");
+      tr.className = "line-translation";
+      if (line._translating) {
+        tr.classList.add("is-pending");
+        tr.textContent = "translating…";
+      } else if (line._failed) {
+        tr.classList.add("is-failed");
+        tr.textContent = "translation unavailable";
+      } else {
+        tr.textContent = line.translation;
+      }
+      body.appendChild(tr);
+    }
+
+    row.appendChild(body);
+    return row;
+  }
+
+  function updateLineNode(line) {
+    if (!line._node) return;
+    const fresh = buildLineNode(line);
+    if (line._node.parentNode) line._node.parentNode.replaceChild(fresh, line._node);
+    line._node = fresh;
+  }
+
+  function nearBottom() {
+    const t = el.transcript;
+    return t.scrollHeight - t.scrollTop - t.clientHeight < 80;
   }
 
   function renderTranscript() {
     el.transcript.innerHTML = "";
-    const showTime = el.timestampToggle.checked;
     const frag = document.createDocumentFragment();
-
     for (const line of lines) {
-      const row = document.createElement("div");
-      row.className = "line";
-
-      if (showTime && line.time) {
-        const t = document.createElement("span");
-        t.className = "line-time";
-        t.textContent = line.time;
-        row.appendChild(t);
-      }
-
-      const txt = document.createElement("span");
-      txt.className = "line-text";
-      txt.textContent = line.text;
-      row.appendChild(txt);
-
-      frag.appendChild(row);
+      const node = buildLineNode(line);
+      line._node = node;
+      frag.appendChild(node);
     }
     el.transcript.appendChild(frag);
     el.transcript.scrollTop = el.transcript.scrollHeight;
@@ -114,20 +340,34 @@
   function appendLine(text) {
     const clean = text.trim();
     if (!clean) return;
-    lines.push({ time: nowLabel(), text: clean });
-    renderTranscript();
+    const line = {
+      time: nowLabel(),
+      text: clean,
+      speaker: activeSpeakerId,
+      lang: el.langSelect.value,
+      translation: null,
+    };
+    const wasNear = nearBottom();
+    lines.push(line);
+    const node = buildLineNode(line);
+    line._node = node;
+    el.transcript.appendChild(node);
+    if (wasNear) el.transcript.scrollTop = el.transcript.scrollHeight;
+
+    updateStats();
+    updateButtonStates();
     saveState();
+    if (el.translateToggle.checked) translateLine(line);
   }
 
   function countWords() {
     let words = 0;
     for (const line of lines) {
-      const t = line.text.trim();
+      const t = (line.text || "").trim();
       if (!t) continue;
-      // CJK characters count individually; other scripts count by whitespace.
-      const cjk = (t.match(/[一-鿿㐀-䶿]/g) || []).length;
-      const nonCjk = t.replace(/[一-鿿㐀-䶿]/g, " ").trim();
-      const latin = nonCjk ? nonCjk.split(/\s+/).filter(Boolean).length : 0;
+      const cjk = (t.match(/[㐀-鿿豈-﫿]/g) || []).length;
+      const rest = t.replace(/[㐀-鿿豈-﫿]/g, " ").trim();
+      const latin = rest ? rest.split(/\s+/).filter(Boolean).length : 0;
       words += cjk + latin;
     }
     return words;
@@ -139,10 +379,10 @@
   }
 
   function updateButtonStates() {
-    const hasContent = lines.length > 0;
-    el.copyBtn.disabled = !hasContent;
-    el.exportBtn.disabled = !hasContent;
-    el.clearBtn.disabled = !hasContent;
+    const has = lines.length > 0;
+    el.copyBtn.disabled = !has;
+    el.exportBtn.disabled = !has;
+    el.clearBtn.disabled = !has;
   }
 
   function setLiveCaption(text, interim) {
@@ -192,9 +432,7 @@
     r.lang = el.langSelect.value;
     r.maxAlternatives = 1;
 
-    r.onstart = function () {
-      setRecordingUI(true);
-    };
+    r.onstart = function () { setRecordingUI(true); };
 
     r.onresult = function (event) {
       let interim = "";
@@ -222,7 +460,6 @@
         setStatus("idle", "Microphone blocked");
         showToast("Microphone permission is required. Enable it and try again.");
       } else if (err === "no-speech") {
-        // Benign — recognizer will end and be restarted by onend.
         setStatus("recording", "Listening… (no speech yet)");
       } else if (err === "audio-capture") {
         stoppedByUser = true;
@@ -233,11 +470,10 @@
     };
 
     r.onend = function () {
-      // Web Speech API stops on its own periodically; restart while recording.
       if (recording && !stoppedByUser) {
         clearTimeout(restartTimer);
         restartTimer = setTimeout(() => {
-          try { r.start(); } catch (_) { /* already started */ }
+          try { r.start(); } catch (_) {}
         }, 250);
       } else {
         setRecordingUI(false);
@@ -255,7 +491,7 @@
       recognition = buildRecognition();
       recognition.start();
       setRecordingUI(true);
-    } catch (err) {
+    } catch (_) {
       showToast("Could not start recording. Try again.");
       setRecordingUI(false);
     }
@@ -265,9 +501,7 @@
     stoppedByUser = true;
     recording = false;
     clearTimeout(restartTimer);
-    if (recognition) {
-      try { recognition.stop(); } catch (_) { /* ignore */ }
-    }
+    if (recognition) { try { recognition.stop(); } catch (_) {} }
     setRecordingUI(false);
   }
 
@@ -281,9 +515,15 @@
   // ---------------------------------------------------------------------------
   function transcriptToText() {
     const showTime = el.timestampToggle.checked;
-    return lines
-      .map((l) => (showTime && l.time ? `[${l.time}] ${l.text}` : l.text))
-      .join("\n");
+    const showTr = el.translateToggle.checked;
+    const out = [];
+    for (const line of lines) {
+      const speaker = getSpeaker(line.speaker).name;
+      const prefix = showTime && line.time ? `[${line.time}] ` : "";
+      out.push(`${prefix}${speaker}: ${line.text}`);
+      if (showTr && line.translation) out.push(`    ↳ ${line.translation}`);
+    }
+    return out.join("\n");
   }
 
   async function copyTranscript() {
@@ -293,19 +533,14 @@
       await navigator.clipboard.writeText(text);
       showToast("Transcript copied to clipboard");
     } catch (_) {
-      // Fallback for older browsers / insecure contexts.
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
-      try {
-        document.execCommand("copy");
-        showToast("Transcript copied to clipboard");
-      } catch (e) {
-        showToast("Copy failed — select the text manually.");
-      }
+      try { document.execCommand("copy"); showToast("Transcript copied to clipboard"); }
+      catch (e) { showToast("Copy failed — select the text manually."); }
       document.body.removeChild(ta);
     }
   }
@@ -313,11 +548,7 @@
   function exportTranscript() {
     const text = transcriptToText();
     if (!text) return;
-    const stamp = new Date()
-      .toISOString()
-      .slice(0, 16)
-      .replace("T", "_")
-      .replace(":", "-");
+    const stamp = new Date().toISOString().slice(0, 16).replace("T", "_").replace(":", "-");
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -350,7 +581,6 @@
   function showToast(message) {
     el.toast.textContent = message;
     el.toast.hidden = false;
-    // Force reflow so the transition runs.
     void el.toast.offsetWidth;
     el.toast.classList.add("show");
     clearTimeout(toastTimer);
@@ -366,21 +596,25 @@
     setStatus("idle", "Not supported");
   }
 
+  function isTypingTarget(t) {
+    return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+  }
+
   // ---------------------------------------------------------------------------
   // Wiring
   // ---------------------------------------------------------------------------
   function init() {
     loadState();
+    renderSpeakerChips();
     renderTranscript();
 
-    if (!getRecognitionClass()) {
-      showUnsupported();
-    }
+    if (!getRecognitionClass()) showUnsupported();
 
     el.recordBtn.addEventListener("click", toggleRecording);
     el.copyBtn.addEventListener("click", copyTranscript);
     el.exportBtn.addEventListener("click", exportTranscript);
     el.clearBtn.addEventListener("click", clearTranscript);
+    el.addSpeakerBtn.addEventListener("click", addSpeaker);
 
     el.langSelect.addEventListener("change", function () {
       savePrefs();
@@ -392,20 +626,27 @@
       renderTranscript();
     });
 
-    // Keyboard shortcut: Ctrl/Cmd + Enter toggles recording.
+    el.translateToggle.addEventListener("change", function () {
+      savePrefs();
+      renderTranscript();
+      if (el.translateToggle.checked) translateMissing();
+    });
+
     document.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         if (!el.recordBtn.disabled) toggleRecording();
+        return;
+      }
+      // Number keys 1-9 select a speaker (when not typing in a field).
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key) && !isTypingTarget(e.target)) {
+        const idx = parseInt(e.key, 10) - 1;
+        if (idx < speakers.length) { setActiveSpeaker(speakers[idx].id); }
       }
     });
 
-    // Warn before leaving while recording.
     window.addEventListener("beforeunload", function (e) {
-      if (recording) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
+      if (recording) { e.preventDefault(); e.returnValue = ""; }
     });
   }
 
