@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meeting Solo — Live Captions &amp; Transcript</title>
+  <meta name="description" content="Real-time live captions and copyable, persistent transcripts for interviews and meetings. English &amp; Chinese." />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🎙️</span>
+      <div class="brand-text">
+        <h1>Meeting Solo</h1>
+        <p>Live captions &amp; transcript for interviews and meetings</p>
+      </div>
+    </div>
+    <div class="status" id="status">
+      <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+      <span id="statusText">Ready</span>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- Controls -->
+    <section class="controls" aria-label="Controls">
+      <button id="recordBtn" class="btn btn-primary" type="button">
+        <span class="btn-icon" aria-hidden="true">●</span>
+        <span id="recordBtnLabel">Start</span>
+      </button>
+
+      <label class="field">
+        <span class="field-label">Language</span>
+        <select id="langSelect" class="select">
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="zh-CN">中文 (简体, Mandarin)</option>
+          <option value="zh-TW">中文 (繁體, Taiwan)</option>
+          <option value="zh-HK">中文 (廣東話, Cantonese)</option>
+        </select>
+      </label>
+
+      <div class="controls-spacer"></div>
+
+      <label class="toggle" title="Add a timestamp to each new line">
+        <input type="checkbox" id="timestampToggle" />
+        <span>Timestamps</span>
+      </label>
+
+      <button id="copyBtn" class="btn" type="button" disabled>Copy</button>
+      <button id="exportBtn" class="btn" type="button" disabled>Export</button>
+      <button id="clearBtn" class="btn btn-danger" type="button" disabled>Clear</button>
+    </section>
+
+    <!-- Live caption bar -->
+    <section class="caption-bar" aria-label="Live caption" aria-live="polite">
+      <p id="liveCaption" class="caption-text caption-placeholder">
+        Press <strong>Start</strong> and begin speaking — your words appear here in real time.
+      </p>
+    </section>
+
+    <!-- Transcript -->
+    <section class="transcript-wrap" aria-label="Full transcript">
+      <div class="transcript-head">
+        <h2>Transcript</h2>
+        <div class="transcript-stats" id="stats">0 lines · 0 words</div>
+      </div>
+      <div id="transcript" class="transcript" tabindex="0"></div>
+    </section>
+
+    <!-- Unsupported browser notice -->
+    <div id="unsupported" class="notice notice-error" hidden>
+      <strong>Speech recognition isn't available in this browser.</strong>
+      Please use <b>Google Chrome</b> or <b>Microsoft Edge</b> on desktop or Android.
+      (Safari and Firefox don't fully support live speech recognition yet.)
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <span>Your transcript is saved automatically in this browser and is never uploaded by this app.</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
