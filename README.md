@@ -2,10 +2,11 @@
 
 **Live captions & a copyable, persistent transcript for interviews and meetings.**
 
-Meeting Solo listens to your microphone and turns speech into text in real time —
-big, readable captions on screen plus a full transcript you can copy, export, and
-keep. It supports **English** and **Chinese** (Mandarin, Taiwan, and Cantonese),
-with **live English ⇄ Chinese translation** and **speaker labels**.
+Meeting Solo turns speech into text in real time — big, readable captions on screen
+plus a full transcript you can copy, export, and keep. It works two ways: **live from
+your microphone**, or by **transcribing a recorded audio/video file** (no microphone
+needed). It supports **English** and **Chinese** (Mandarin, Taiwan, and Cantonese),
+with **English ⇄ Chinese translation** and **speaker labels**.
 
 It's built to fix the three frustrating limits of Windows 11 Live Captions:
 
@@ -18,6 +19,9 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 ## Features
 
 - **Real-time captions** — a large live caption bar shows words as you speak.
+- **Transcribe recorded files** — click **📁 File** to caption an existing audio or
+  video recording (mp3, wav, m4a, mp4, webm…). Runs entirely in your browser — the
+  file is never uploaded. No microphone required.
 - **Full scrollable transcript** — every finalized line is kept, with optional timestamps.
 - **English & Chinese** — pick your language from the dropdown.
 - **Live English ⇄ Chinese translation** — turn on **Translate ⇄** and each line is
@@ -41,6 +45,22 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 5. Click **Start** and allow microphone access when prompted.
 6. Speak — captions appear live and finalized lines collect in the transcript.
 7. Use **Copy**, **Export**, or **Clear** at any time.
+
+### Transcribe a recorded file (no microphone)
+
+Want to caption an interview you already recorded, or a meeting video?
+
+1. Pick the **Language** of the recording.
+2. Click **📁 File** and choose an audio or video file.
+3. The first time, a small speech-recognition model (**Whisper**) downloads to your
+   browser (~tens of MB, cached afterward). A progress bar shows download, then
+   transcription.
+4. When it finishes, every segment drops into the transcript with its timecode.
+   Turn on **Translate ⇄** to translate them, and use **Copy** / **Export** as usual.
+
+This runs **100% in your browser** using WebAssembly — the file never leaves your
+device — so it works in **any** modern browser, including Safari and Firefox. Longer
+recordings take longer; a rough guide is a fraction of real-time on a typical laptop.
 
 ### Translation & speaker labels — how they work
 
@@ -74,42 +94,45 @@ python3 -m http.server 8000
 
 ## Browser support
 
-Meeting Solo uses the browser's built-in **Web Speech API**.
+Meeting Solo has two transcription engines:
 
-- ✅ **Google Chrome** (desktop, Android)
-- ✅ **Microsoft Edge** (desktop)
-- ⚠️ **Safari / Firefox** — limited or no support; the app shows a notice.
+| Engine | Used for | Browser support |
+| --- | --- | --- |
+| **Web Speech API** (built-in) | Live microphone captions | Chrome & Edge (desktop, Android) |
+| **Whisper via `transformers.js`** (WebAssembly) | 📁 File transcription | Any modern browser, incl. Safari & Firefox |
+
+So even where live captions aren't supported, **file transcription still works**.
 
 ## Privacy
 
 Meeting Solo has **no backend of its own** and stores your transcript only in your
-browser (localStorage). Two features do rely on online services, though:
+browser (localStorage). Here's where data goes for each feature:
 
-- **Speech recognition** — the Web Speech API in Chrome/Edge sends microphone audio
-  to the browser vendor's speech service to turn it into text. This is how the
-  browser's speech recognition works everywhere.
+- **📁 File transcription — fully on-device.** The Whisper model runs in your browser
+  via WebAssembly; the audio/video file is decoded and transcribed locally and is
+  **never uploaded**. (The one-time model download comes from a public CDN.)
+- **Live microphone captions** — the Web Speech API in Chrome/Edge sends microphone
+  audio to the browser vendor's speech service to turn it into text. This is how the
+  browser's built-in speech recognition works everywhere.
 - **Translation (only when the Translate toggle is on)** — each finalized line of
   text is sent to a public translation service (Google Translate's free endpoint,
   with MyMemory as a fallback) and the translation is sent back. With translation
   **off**, no transcript text leaves your browser through this app.
-
-If you need everything to stay fully on-device, that requires an offline model
-(e.g. Whisper) — see the roadmap below.
 
 ## Project structure
 
 ```
 index.html   — markup & layout
 styles.css   — theme-aware styling (light/dark)
-app.js       — recognition, transcript, persistence, export
+app.js       — live recognition, file transcription, transcript, translation, export
 ```
 
 ## Roadmap ideas
 
 - Automatic speaker separation (diarization) from the audio
-- Multi-language auto-switching within one session
+- Sync the file transcript with a video player (click a line to jump to that moment)
+- Larger Whisper model option for higher accuracy on tough audio
 - Export to Markdown, `.srt`, and `.vtt`
-- Optional on-device model (Whisper) for full offline privacy & Safari/Firefox support
 - Show the translation live in the caption bar as you speak
 
 ## License

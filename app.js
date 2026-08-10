@@ -25,6 +25,12 @@
   const el = {
     recordBtn: document.getElementById("recordBtn"),
     recordBtnLabel: document.getElementById("recordBtnLabel"),
+    fileBtn: document.getElementById("fileBtn"),
+    fileInput: document.getElementById("fileInput"),
+    fileProgress: document.getElementById("fileProgress"),
+    fpText: document.getElementById("fpText"),
+    fpFill: document.getElementById("fpFill"),
+    fpCancel: document.getElementById("fpCancel"),
     langSelect: document.getElementById("langSelect"),
     translateToggle: document.getElementById("translateToggle"),
     timestampToggle: document.getElementById("timestampToggle"),
@@ -56,6 +62,13 @@
   let recording = false;
   let stoppedByUser = false;
   let restartTimer = null;
+
+  // File transcription (in-browser Whisper via transformers.js)
+  const WHISPER_MODEL = "Xenova/whisper-base";
+  const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+  let transcriber = null;
+  let fileToken = 0; // bumped to cancel/ignore an in-flight job
+  let processingFile = false;
 
   // ---------------------------------------------------------------------------
   // Persistence
@@ -511,6 +524,168 @@
   }
 
   // ---------------------------------------------------------------------------
+  // File transcription — Whisper running in the browser (no microphone, no server)
+  // ---------------------------------------------------------------------------
+  function whisperLang(lang) {
+    return lang && lang.toLowerCase().indexOf("zh") === 0 ? "chinese" : "english";
+  }
+
+  function secondsToLabel(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const p = (n) => String(n).padStart(2, "0");
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${p(m)}:${p(sec)}`;
+  }
+
+  function showFileProgress(on) { el.fileProgress.hidden = !on; }
+  function setFpText(text) { el.fpText.textContent = text; }
+  function setFpFill(pct) {
+    el.fpFill.classList.remove("indeterminate");
+    el.fpFill.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  }
+  function setFpIndeterminate(on) {
+    if (on) { el.fpFill.style.width = ""; el.fpFill.classList.add("indeterminate"); }
+    else { el.fpFill.classList.remove("indeterminate"); }
+  }
+
+  async function ensureTranscriber(onProgress) {
+    if (transcriber) return transcriber;
+    const mod = await import(/* webpackIgnore: true */ TRANSFORMERS_URL);
+    try { mod.env.allowLocalModels = false; } catch (_) {}
+    transcriber = await mod.pipeline("automatic-speech-recognition", WHISPER_MODEL, {
+      quantized: true,
+      progress_callback: onProgress,
+    });
+    return transcriber;
+  }
+
+  // Decode any browser-playable media into mono 16 kHz PCM (what Whisper needs).
+  async function decodeAudio(file) {
+    const buf = await file.arrayBuffer();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const tmp = new Ctx();
+    let decoded;
+    try {
+      decoded = await tmp.decodeAudioData(buf.slice(0));
+    } finally {
+      if (tmp.close) tmp.close();
+    }
+    const targetRate = 16000;
+    const frames = Math.max(1, Math.ceil(decoded.duration * targetRate));
+    const offline = new OfflineAudioContext(1, frames, targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0);
+  }
+
+  function addFileLines(chunks) {
+    let added = 0;
+    for (const c of chunks) {
+      const text = (c.text || "").trim();
+      if (!text) continue;
+      const start = c.timestamp && c.timestamp[0] != null ? c.timestamp[0] : 0;
+      lines.push({
+        time: secondsToLabel(start),
+        text: text,
+        speaker: activeSpeakerId,
+        lang: el.langSelect.value,
+        translation: null,
+      });
+      added += 1;
+    }
+    renderTranscript();
+    saveState();
+    return added;
+  }
+
+  async function processFile(file) {
+    if (processingFile) return;
+    const token = ++fileToken;
+    const cancelled = () => token !== fileToken;
+
+    processingFile = true;
+    el.recordBtn.disabled = true;
+    el.fileBtn.disabled = true;
+    showFileProgress(true);
+    setFpIndeterminate(true);
+    setFpText("Loading transcription model… (first run downloads it once)");
+
+    try {
+      const asr = await ensureTranscriber((p) => {
+        if (!p) return;
+        if (p.status === "progress" && p.file && typeof p.progress === "number") {
+          const name = String(p.file).split("/").pop();
+          setFpFill(Math.round(p.progress));
+          setFpText(`Downloading model — ${name} ${Math.round(p.progress)}%`);
+        }
+      });
+      if (cancelled()) return;
+
+      setFpIndeterminate(true);
+      setFpText(`Decoding “${file.name}”…`);
+      let audio;
+      try {
+        audio = await decodeAudio(file);
+      } catch (_) {
+        throw new Error("decode-failed");
+      }
+      if (cancelled()) return;
+
+      const mins = Math.round((audio.length / 16000 / 60) * 10) / 10;
+      setFpText(`Transcribing “${file.name}” (~${mins} min of audio)… this can take a while.`);
+
+      const result = await asr(audio, {
+        language: whisperLang(el.langSelect.value),
+        task: "transcribe",
+        chunk_length_s: 30,
+        stride_length_s: 5,
+        return_timestamps: true,
+      });
+      if (cancelled()) return;
+
+      const chunks = result && result.chunks && result.chunks.length
+        ? result.chunks
+        : [{ timestamp: [0, null], text: (result && result.text) || "" }];
+      const added = addFileLines(chunks);
+
+      showFileProgress(false);
+      if (added > 0) {
+        showToast(`Transcribed ${added} segment${added === 1 ? "" : "s"} from ${file.name}`);
+        if (el.translateToggle.checked) translateMissing();
+      } else {
+        showToast("No speech was detected in that file.");
+      }
+    } catch (err) {
+      showFileProgress(false);
+      if (err && err.message === "decode-failed") {
+        showToast("Couldn't read that file's audio. Try mp3, wav, m4a, or a standard mp4.");
+      } else {
+        showToast("Couldn't load the transcription model. Check your internet connection and retry.");
+      }
+    } finally {
+      processingFile = false;
+      el.fileBtn.disabled = false;
+      if (getRecognitionClass()) el.recordBtn.disabled = false;
+      setFpIndeterminate(false);
+    }
+  }
+
+  function cancelFile() {
+    fileToken += 1; // invalidate the in-flight job's results
+    showFileProgress(false);
+    setFpIndeterminate(false);
+    processingFile = false;
+    el.fileBtn.disabled = false;
+    if (getRecognitionClass()) el.recordBtn.disabled = false;
+    showToast("Cancelled");
+  }
+
+  // ---------------------------------------------------------------------------
   // Export / copy / clear
   // ---------------------------------------------------------------------------
   function transcriptToText() {
@@ -611,6 +786,16 @@
     if (!getRecognitionClass()) showUnsupported();
 
     el.recordBtn.addEventListener("click", toggleRecording);
+    el.fileBtn.addEventListener("click", function () {
+      if (recording) { showToast("Stop recording before transcribing a file."); return; }
+      el.fileInput.click();
+    });
+    el.fileInput.addEventListener("change", function () {
+      const file = el.fileInput.files && el.fileInput.files[0];
+      el.fileInput.value = ""; // allow re-selecting the same file later
+      if (file) processFile(file);
+    });
+    el.fpCancel.addEventListener("click", cancelFile);
     el.copyBtn.addEventListener("click", copyTranscript);
     el.exportBtn.addEventListener("click", exportTranscript);
     el.clearBtn.addEventListener("click", clearTranscript);

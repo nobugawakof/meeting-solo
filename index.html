@@ -31,6 +31,11 @@
         <span id="recordBtnLabel">Start</span>
       </button>
 
+      <button id="fileBtn" class="btn" type="button" title="Transcribe a recorded audio or video file — no microphone needed">
+        <span aria-hidden="true">📁</span> File
+      </button>
+      <input id="fileInput" type="file" accept="audio/*,video/*" hidden />
+
       <label class="field">
         <span class="field-label">Language</span>
         <select id="langSelect" class="select">
@@ -66,6 +71,15 @@
       <span class="speaker-hint">click to set who's talking · double-click to rename · keys 1–9</span>
     </section>
 
+    <!-- File transcription progress -->
+    <section id="fileProgress" class="file-progress" hidden aria-live="polite">
+      <div class="fp-row">
+        <span id="fpText" class="fp-text">Preparing…</span>
+        <button id="fpCancel" class="btn btn-sm" type="button">Cancel</button>
+      </div>
+      <div class="fp-bar"><div id="fpFill" class="fp-fill"></div></div>
+    </section>
+
     <!-- Live caption bar -->
     <section class="caption-bar" aria-label="Live caption" aria-live="polite">
       <p id="liveCaption" class="caption-text caption-placeholder">
@@ -84,9 +98,9 @@
 
     <!-- Unsupported browser notice -->
     <div id="unsupported" class="notice notice-error" hidden>
-      <strong>Speech recognition isn't available in this browser.</strong>
-      Please use <b>Google Chrome</b> or <b>Microsoft Edge</b> on desktop or Android.
-      (Safari and Firefox don't fully support live speech recognition yet.)
+      <strong>Live microphone captions aren't available in this browser.</strong>
+      For live captions, use <b>Google Chrome</b> or <b>Microsoft Edge</b> on desktop or Android.
+      You can still use <b>📁 File</b> above to transcribe recorded audio or video — that works in any modern browser.
     </div>
   </main>
 
