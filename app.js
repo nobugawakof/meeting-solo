@@ -695,7 +695,7 @@
       if (err && err.message === "decode-failed") {
         showToast("Couldn't read that file's audio. Try mp3, wav, m4a, or a standard mp4.");
       } else {
-        showToast("Couldn't load the transcription model. Check your internet connection and retry.");
+        showToast("Couldn't load the speech model. For offline use, run scripts/fetch-model.sh (see models/README.md).");
       }
     } finally {
       processingFile = false;

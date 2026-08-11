@@ -65,10 +65,32 @@ WebAssembly, so the file never leaves your device and it works in **any** modern
 browser, including Safari and Firefox. Longer recordings take longer; expect a
 fraction of real-time on a typical laptop.
 
-> **Why isn't the model bundled into the app?** It's ~40 MB — bundling it would slow
-> down *every* startup, including for people who only use the live microphone. Instead
-> it's fetched lazily the first time you transcribe a file, then cached by the browser,
-> which keeps the app itself instant to open.
+### Self-hosted & offline — no CDN required
+
+The transcription **runtime** (the `transformers.js` library and the ONNX-Runtime
+WebAssembly) is **vendored into this project** under [`vendor/`](vendor/), so nothing
+is fetched from a CDN like jsdelivr. Only the **model weights** need to come from
+somewhere the first time:
+
+- **By default**, they're fetched once from **[hf-mirror.com](https://hf-mirror.com)**
+  — a HuggingFace mirror reachable worldwide, **including mainland China**, where
+  `huggingface.co` is often blocked or slow — then cached by your browser. (Change
+  the source with `MODEL_HOST` in [`worker.js`](worker.js).)
+- **For a fully offline, self-contained setup**, vendor the model into the project too:
+
+  ```bash
+  bash scripts/fetch-model.sh
+  ```
+
+  This downloads the model into `models/Xenova/whisper-base/`. After that the app
+  loads everything — library, runtime, and model — from this project with **no network
+  at all**. See [`models/README.md`](models/README.md) for options.
+
+> **Why isn't the model committed into the repo?** The weights are ~40 MB, so they're
+> git-ignored by default to keep the repo light; `scripts/fetch-model.sh` fetches them
+> on demand. The small runtime files *are* committed, so the app is CDN-independent out
+> of the box. (Remove the `models/**` rule in `.gitignore` if you want to commit the
+> weights into your own fork.)
 
 ### Translation & speaker labels — how they work
 
@@ -130,10 +152,13 @@ browser (localStorage). Here's where data goes for each feature:
 ## Project structure
 
 ```
-index.html   — markup & layout
-styles.css   — theme-aware styling (light/dark)
-app.js       — live recognition, transcript, translation, export, UI
-worker.js    — background thread that runs Whisper for file transcription
+index.html              — markup & layout
+styles.css              — theme-aware styling (light/dark)
+app.js                  — live recognition, transcript, translation, export, UI
+worker.js               — background thread that runs Whisper for file transcription
+vendor/transformers/    — self-hosted transformers.js library + ONNX-Runtime WASM
+models/                 — local Whisper weights (fetch with scripts/fetch-model.sh)
+scripts/fetch-model.sh  — one-command model download (mirror-friendly)
 ```
 
 ## Roadmap ideas

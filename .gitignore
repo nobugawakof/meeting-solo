@@ -12,3 +12,9 @@ npm-debug.log*
 # Local build / temp
 dist/
 *.log
+
+# Large local model weights (fetch with scripts/fetch-model.sh).
+# The models/README.md and folder structure are kept; the weights are not.
+models/**/*.onnx
+models/**/*.bin
+models/**/*.json
