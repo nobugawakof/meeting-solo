@@ -1,7 +1,7 @@
 name: Build desktop app
 
-# Builds the Meeting Solo desktop app installers with electron-builder and
-# uploads them as downloadable artifacts, so you don't have to build locally.
+# Builds the Meeting Solo Windows installer with electron-builder and uploads it
+# as a downloadable artifact, so you don't have to build locally.
 
 on:
   # Build automatically when the app code changes on the working branch.
@@ -25,37 +25,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            script: dist:win
-            artifact: meeting-solo-windows
-            path: "dist/*.exe"
-          - os: macos-latest
-            script: dist:mac
-            artifact: meeting-solo-macos
-            path: "dist/*.dmg"
-          - os: ubuntu-latest
-            script: dist:linux
-            artifact: meeting-solo-linux
-            path: "dist/*.AppImage"
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install dependencies
         run: npm install
 
-      - name: Build installer
-        run: npm run ${{ matrix.script }}
+      - name: Build Windows installer
+        run: npm run dist:win
         env:
           # Don't attempt code signing in CI (unsigned build).
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -63,6 +46,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
-          if-no-files-found: warn
+          name: meeting-solo-windows
+          path: |
+            dist/*.exe
+          if-no-files-found: error

@@ -7,9 +7,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dist:win": "electron-builder --win"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -27,8 +25,6 @@
       "models/**",
       "electron/**"
     ],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.productivity" },
-    "linux": { "target": "AppImage", "category": "AudioVideo" }
+    "win": { "target": "nsis" }
   }
 }

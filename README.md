@@ -149,10 +149,10 @@ npm run dist        # current OS
 npm run dist:win    # Windows (.exe / NSIS)
 ```
 
-Or **download a pre-built installer from CI**: every push to the app builds
-Windows, macOS and Linux installers via GitHub Actions
+Or **download a pre-built installer from CI**: every push to the app builds the
+Windows installer via GitHub Actions
 ([`.github/workflows/build-desktop.yml`](.github/workflows/build-desktop.yml)) —
-grab them from the run's **Artifacts**, or publish a GitHub Release to build them
+grab it from the run's **Artifacts**, or publish a GitHub Release to build it
 for that release.
 
 ### Live transcription niceties
