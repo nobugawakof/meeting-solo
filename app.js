@@ -41,6 +41,7 @@
     clearBtn: document.getElementById("clearBtn"),
     speakerChips: document.getElementById("speakerChips"),
     addSpeakerBtn: document.getElementById("addSpeakerBtn"),
+    autoSpeakerToggle: document.getElementById("autoSpeakerToggle"),
     liveCaption: document.getElementById("liveCaption"),
     transcript: document.getElementById("transcript"),
     stats: document.getElementById("stats"),
@@ -76,16 +77,22 @@
   const IS_DESKTOP = !!(window.meetingSoloDesktop);
   const STREAM_SR = 16000;
   const SILENCE_RMS = 0.008;      // below this = "silence"
-  const SILENCE_HOLD_MS = 700;    // silence this long ends a segment
-  const MIN_SPEECH_MS = 700;      // need at least this much speech to flush
-  const MAX_SEG_MS = 15000;       // hard cap so long talk still flushes
+  const SILENCE_HOLD_MS = 550;    // silence this long ends a segment
+  const MIN_SPEECH_MS = 600;      // need at least this much speech to flush
+  const MAX_SEG_MS = 9000;        // hard cap so long talk still flushes as a line
   const MIN_SEG_SAMPLES = STREAM_SR * 0.4;
+  const INTERIM_MIN_MS = 800;     // min voiced audio before showing a live preview
+  const INTERIM_THROTTLE_MS = 1000; // don't preview more often than this
+  const TURN_GAP_MS = 900;        // silence longer than this => likely a new speaker
   let streaming = false;
   let streamSource = "";          // "mic" | "system"
   let streamCtx = null, streamNode = null, streamSrcNode = null, streamGain = null;
   let mediaStream = null;
   let pcmBuf = [], pcmLen = 0, silentMs = 0, voicedMs = 0;
-  let segQueue = [], segInFlight = false;
+  let segQueue = [], workerBusy = false;
+  let nextSegPrecededByGap = false; // did a long pause precede the next segment?
+  let lastInterimAt = 0;            // performance.now() of the last live preview
+  let autoSpeaker = false;          // auto-advance speaker on long pauses
 
   // ---------------------------------------------------------------------------
   // Persistence
@@ -122,7 +129,9 @@
       if (prefs.lang) el.langSelect.value = prefs.lang;
       if (typeof prefs.timestamps === "boolean") el.timestampToggle.checked = prefs.timestamps;
       if (typeof prefs.translate === "boolean") el.translateToggle.checked = prefs.translate;
+      if (typeof prefs.autoSpeaker === "boolean") el.autoSpeakerToggle.checked = prefs.autoSpeaker;
     } catch (_) {}
+    autoSpeaker = el.autoSpeakerToggle.checked;
   }
 
   function saveState() {
@@ -144,6 +153,7 @@
         lang: el.langSelect.value,
         timestamps: el.timestampToggle.checked,
         translate: el.translateToggle.checked,
+        autoSpeaker: el.autoSpeakerToggle.checked,
       }));
     } catch (_) {}
   }
@@ -661,6 +671,7 @@
     processingFile = true;
     el.recordBtn.disabled = true;
     el.fileBtn.disabled = true;
+    el.sysAudioBtn.disabled = true;
     showFileProgress(true);
     setFpIndeterminate(true);
     setFpText(`Decoding “${file.name}”…`);
@@ -718,7 +729,8 @@
     } finally {
       processingFile = false;
       el.fileBtn.disabled = false;
-      if (getRecognitionClass()) el.recordBtn.disabled = false;
+      if (IS_DESKTOP) { el.sysAudioBtn.disabled = false; el.recordBtn.disabled = false; }
+      else if (getRecognitionClass()) el.recordBtn.disabled = false;
       setFpIndeterminate(false);
     }
   }
@@ -735,7 +747,8 @@
     setFpIndeterminate(false);
     processingFile = false;
     el.fileBtn.disabled = false;
-    if (getRecognitionClass()) el.recordBtn.disabled = false;
+    if (IS_DESKTOP) { el.sysAudioBtn.disabled = false; el.recordBtn.disabled = false; }
+    else if (getRecognitionClass()) el.recordBtn.disabled = false;
     showToast("Cancelled");
   }
 
@@ -751,6 +764,9 @@
     if (el.sysAudioLabel) el.sysAudioLabel.textContent = sysActive ? "Stop" : "System audio";
     el.langSelect.disabled = on;
     el.fileBtn.disabled = on;
+    // Only the active capture button stays enabled while streaming.
+    el.recordBtn.disabled = on && !micActive;
+    el.sysAudioBtn.disabled = on && !sysActive;
     if (on) {
       setStatus("recording", kind === "system" ? "Capturing system audio…" : "Listening…");
     } else {
@@ -791,6 +807,8 @@
     streamGain.gain.value = 0; // don't play the audio back (no echo)
 
     pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
+    segQueue = []; workerBusy = false; nextSegPrecededByGap = false; lastInterimAt = 0;
+
     streamNode.onaudioprocess = function (e) {
       if (!streaming) return;
       const input = e.inputBuffer.getChannelData(0);
@@ -806,8 +824,13 @@
       else { silentMs = 0; voicedMs += ms; }
 
       const totalMs = (pcmLen / STREAM_SR) * 1000;
-      if ((silentMs >= SILENCE_HOLD_MS && voicedMs >= MIN_SPEECH_MS) || totalMs >= MAX_SEG_MS) {
-        flushSegment();
+      const silenceEnd = silentMs >= SILENCE_HOLD_MS && voicedMs >= MIN_SPEECH_MS;
+      const hardCap = totalMs >= MAX_SEG_MS;
+      if (silenceEnd || hardCap) {
+        // A long trailing silence suggests the *next* segment is a new speaker.
+        flushSegment(silenceEnd && silentMs >= TURN_GAP_MS);
+      } else {
+        dispatch(); // maybe render a live interim preview
       }
     };
 
@@ -816,34 +839,81 @@
     streamGain.connect(streamCtx.destination);
   }
 
-  function flushSegment() {
+  // Concatenate the buffered audio without clearing it (for live previews).
+  function snapshotPcm() {
+    const seg = new Float32Array(pcmLen);
+    let off = 0;
+    for (const c of pcmBuf) { seg.set(c, off); off += c.length; }
+    return seg;
+  }
+
+  function resultText(result) {
+    return (result && (result.text ||
+      (result.chunks || []).map((c) => c.text).join(" "))) || "";
+  }
+
+  function flushSegment(precededGapForNext) {
     if (pcmLen < MIN_SEG_SAMPLES) {
       if (!streaming) { pcmBuf = []; pcmLen = 0; }
       return;
     }
-    const seg = new Float32Array(pcmLen);
-    let off = 0;
-    for (const c of pcmBuf) { seg.set(c, off); off += c.length; }
+    const seg = snapshotPcm();
+    const gap = nextSegPrecededByGap;
     pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
-    segQueue.push(seg);
-    pumpQueue();
+    nextSegPrecededByGap = !!precededGapForNext;
+    segQueue.push({ audio: seg, gap: gap });
+    dispatch();
   }
 
-  async function pumpQueue() {
-    if (segInFlight || !segQueue.length) return;
-    segInFlight = true;
-    const seg = segQueue.shift();
-    try {
-      const result = await transcribeInWorker(
-        seg, whisperLang(el.langSelect.value), function () {}, function () {}
-      );
-      const text = (result && (result.text ||
-        (result.chunks || []).map((c) => c.text).join(" "))) || "";
-      const clean = text.trim();
-      if (clean) appendLine(clean);
-    } catch (_) { /* skip a failed segment, keep going */ }
-    segInFlight = false;
-    if (segQueue.length) pumpQueue();
+  function advanceSpeaker() {
+    if (speakers.length < 2) return;
+    const i = speakers.findIndex((s) => s.id === activeSpeakerId);
+    const next = speakers[(i + 1) % speakers.length];
+    setActiveSpeaker(next.id);
+  }
+
+  // One worker job at a time. Finalized segments (which append transcript lines)
+  // take priority; when none are pending, a throttled interim preview of the
+  // audio currently being spoken is shown in the live caption bar.
+  async function dispatch() {
+    if (workerBusy) return;
+
+    if (segQueue.length) {
+      workerBusy = true;
+      const job = segQueue.shift();
+      try {
+        const result = await transcribeInWorker(
+          job.audio, whisperLang(el.langSelect.value), function () {}, function () {}
+        );
+        const clean = resultText(result).trim();
+        if (clean) {
+          if (autoSpeaker && job.gap) advanceSpeaker();
+          appendLine(clean);
+        }
+      } catch (_) { /* skip a failed segment */ }
+      workerBusy = false;
+      dispatch();
+      return;
+    }
+
+    if (!streaming) return;
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const bufferedMs = (pcmLen / STREAM_SR) * 1000;
+    if (voicedMs >= INTERIM_MIN_MS && bufferedMs >= INTERIM_MIN_MS &&
+        (now - lastInterimAt) >= INTERIM_THROTTLE_MS) {
+      lastInterimAt = now;
+      workerBusy = true;
+      const snap = snapshotPcm();
+      try {
+        const result = await transcribeInWorker(
+          snap, whisperLang(el.langSelect.value), function () {}, function () {}
+        );
+        const clean = resultText(result).trim();
+        if (streaming && clean && !segQueue.length) setLiveCaption(clean, true);
+      } catch (_) {}
+      workerBusy = false;
+      dispatch();
+    }
   }
 
   function stopStreaming() {
@@ -853,7 +923,7 @@
     if (streamSrcNode) { try { streamSrcNode.disconnect(); } catch (_) {} }
     if (streamGain) { try { streamGain.disconnect(); } catch (_) {} }
     if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
-    flushSegment(); // transcribe whatever is left
+    flushSegment(false); // transcribe whatever is left
     if (streamCtx && streamCtx.close) { try { streamCtx.close(); } catch (_) {} }
     streamCtx = null; streamSrcNode = null; streamNode = null; streamGain = null; mediaStream = null;
     setStreamUI(false, streamSource);
@@ -997,6 +1067,10 @@
     el.exportBtn.addEventListener("click", exportTranscript);
     el.clearBtn.addEventListener("click", clearTranscript);
     el.addSpeakerBtn.addEventListener("click", addSpeaker);
+    el.autoSpeakerToggle.addEventListener("change", function () {
+      autoSpeaker = el.autoSpeakerToggle.checked;
+      savePrefs();
+    });
 
     el.langSelect.addEventListener("change", function () {
       savePrefs();

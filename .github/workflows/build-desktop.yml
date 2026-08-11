@@ -1,0 +1,68 @@
+name: Build desktop app
+
+# Builds the Meeting Solo desktop app installers with electron-builder and
+# uploads them as downloadable artifacts, so you don't have to build locally.
+
+on:
+  # Build automatically when the app code changes on the working branch.
+  push:
+    branches:
+      - claude/interview-meeting-transcription-zcm71u
+      - main
+    paths:
+      - "index.html"
+      - "styles.css"
+      - "app.js"
+      - "worker.js"
+      - "electron/**"
+      - "vendor/**"
+      - "package.json"
+      - ".github/workflows/build-desktop.yml"
+  # Also build when a GitHub Release is published.
+  release:
+    types: [published]
+  # Or trigger manually from the Actions tab.
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            artifact: meeting-solo-windows
+            path: "dist/*.exe"
+          - os: macos-latest
+            script: dist:mac
+            artifact: meeting-solo-macos
+            path: "dist/*.dmg"
+          - os: ubuntu-latest
+            script: dist:linux
+            artifact: meeting-solo-linux
+            path: "dist/*.AppImage"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+        env:
+          # Don't attempt code signing in CI (unsigned build).
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: warn

@@ -149,6 +149,20 @@ npm run dist        # current OS
 npm run dist:win    # Windows (.exe / NSIS)
 ```
 
+Or **download a pre-built installer from CI**: every push to the app builds
+Windows, macOS and Linux installers via GitHub Actions
+([`.github/workflows/build-desktop.yml`](.github/workflows/build-desktop.yml)) —
+grab them from the run's **Artifacts**, or publish a GitHub Release to build them
+for that release.
+
+### Live transcription niceties
+
+- **Live preview** — while you speak, an evolving draft of the current sentence
+  shows in the caption bar; the finished line drops into the transcript on a pause.
+- **Auto-speaker** — tick **Auto** next to the speakers to switch the active
+  speaker automatically after a longer pause (handy for 2-person calls). It's a
+  pause-based heuristic, so you can still correct it by clicking a speaker chip.
+
 ### How it works & platform notes
 
 - In the desktop app, live audio (both the **microphone** and **system audio**) is
