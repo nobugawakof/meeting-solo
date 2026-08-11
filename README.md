@@ -22,6 +22,9 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 - **Transcribe recorded files** — click **📁 File** to caption an existing audio or
   video recording (mp3, wav, m4a, mp4, webm…). Runs entirely in your browser — the
   file is never uploaded. No microphone required.
+- **Capture system audio (desktop app)** — run Meeting Solo as a desktop app and
+  click **🔊 System audio** to transcribe sound from **any program** — Telegram,
+  Lark, Zoom, a browser tab — live, without a microphone.
 - **Full scrollable transcript** — every finalized line is kept, with optional timestamps.
 - **English & Chinese** — pick your language from the dropdown.
 - **Live English ⇄ Chinese translation** — turn on **Translate ⇄** and each line is
@@ -122,6 +125,49 @@ python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
+## Desktop app (capture system audio from any program)
+
+Browsers are sandboxed and can't listen to other apps. To transcribe audio from
+**native apps like Telegram and Lark** live, run Meeting Solo as a desktop app
+(Electron), which can capture your computer's **system (loopback) audio**.
+
+### Run it
+
+```bash
+npm install      # installs Electron
+npm start        # launches the desktop app
+```
+
+Then click **🔊 System audio**, and Meeting Solo transcribes whatever is playing
+on your computer — a Telegram call, a Lark meeting, a video — into the transcript,
+with the same translation, speaker labels, copy and export.
+
+### Build an installer
+
+```bash
+npm run dist        # current OS
+npm run dist:win    # Windows (.exe / NSIS)
+```
+
+### How it works & platform notes
+
+- In the desktop app, live audio (both the **microphone** and **system audio**) is
+  transcribed with **Whisper** — the same on-device engine as file mode — because
+  the browser's Web Speech API isn't available in Electron. Audio is segmented on
+  natural pauses and each segment is transcribed in the background worker.
+- **Windows:** system-audio loopback capture is fully supported. ✅ (You're on
+  Windows 11 — this is the target.)
+- **macOS:** depends on the OS version (ScreenCaptureKit) and may require a
+  loopback audio device (e.g. BlackHole).
+- **Linux:** uses the PulseAudio monitor source.
+- For the best desktop experience, vendor the model locally first
+  (`bash scripts/fetch-model.sh`) so live transcription starts instantly and works
+  fully offline.
+
+> **Note:** live streaming transcription trades a little latency for accuracy — a
+> line appears a moment after each pause in speech, not word-by-word. This is the
+> first version of desktop capture; expect it to improve.
+
 ## Browser support
 
 Meeting Solo has two transcription engines:
@@ -159,6 +205,8 @@ worker.js               — background thread that runs Whisper for file transcr
 vendor/transformers/    — self-hosted transformers.js library + ONNX-Runtime WASM
 models/                 — local Whisper weights (fetch with scripts/fetch-model.sh)
 scripts/fetch-model.sh  — one-command model download (mirror-friendly)
+electron/               — desktop app (main + preload) for system-audio capture
+package.json            — Electron dependencies & build config
 ```
 
 ## Roadmap ideas

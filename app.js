@@ -27,6 +27,8 @@
     recordBtnLabel: document.getElementById("recordBtnLabel"),
     fileBtn: document.getElementById("fileBtn"),
     fileInput: document.getElementById("fileInput"),
+    sysAudioBtn: document.getElementById("sysAudioBtn"),
+    sysAudioLabel: document.getElementById("sysAudioLabel"),
     fileProgress: document.getElementById("fileProgress"),
     fpText: document.getElementById("fpText"),
     fpFill: document.getElementById("fpFill"),
@@ -68,6 +70,22 @@
   let whisperWorker = null;
   let fileToken = 0; // bumped to cancel/ignore an in-flight job
   let processingFile = false;
+
+  // Desktop (Electron) live streaming: capture mic or system audio, segment it
+  // on silence, and transcribe each segment with Whisper in the worker.
+  const IS_DESKTOP = !!(window.meetingSoloDesktop);
+  const STREAM_SR = 16000;
+  const SILENCE_RMS = 0.008;      // below this = "silence"
+  const SILENCE_HOLD_MS = 700;    // silence this long ends a segment
+  const MIN_SPEECH_MS = 700;      // need at least this much speech to flush
+  const MAX_SEG_MS = 15000;       // hard cap so long talk still flushes
+  const MIN_SEG_SAMPLES = STREAM_SR * 0.4;
+  let streaming = false;
+  let streamSource = "";          // "mic" | "system"
+  let streamCtx = null, streamNode = null, streamSrcNode = null, streamGain = null;
+  let mediaStream = null;
+  let pcmBuf = [], pcmLen = 0, silentMs = 0, voicedMs = 0;
+  let segQueue = [], segInFlight = false;
 
   // ---------------------------------------------------------------------------
   // Persistence
@@ -722,6 +740,133 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Desktop live streaming (Electron) — mic or system audio → Whisper
+  // ---------------------------------------------------------------------------
+  function setStreamUI(on, kind) {
+    const micActive = on && kind === "mic";
+    const sysActive = on && kind === "system";
+    el.recordBtn.classList.toggle("is-recording", micActive);
+    el.recordBtnLabel.textContent = micActive ? "Stop" : "Start";
+    el.sysAudioBtn.classList.toggle("is-recording", sysActive);
+    if (el.sysAudioLabel) el.sysAudioLabel.textContent = sysActive ? "Stop" : "System audio";
+    el.langSelect.disabled = on;
+    el.fileBtn.disabled = on;
+    if (on) {
+      setStatus("recording", kind === "system" ? "Capturing system audio…" : "Listening…");
+    } else {
+      setStatus("idle", "Ready");
+      setLiveCaption("");
+    }
+  }
+
+  async function startStreaming(kind) {
+    if (streaming) return;
+    let stream;
+    try {
+      if (kind === "system") {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        stream.getVideoTracks().forEach((t) => t.stop());
+        if (!stream.getAudioTracks().length) throw new Error("no-audio");
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (e) {
+      showToast(kind === "system"
+        ? "Couldn't capture system audio. Make sure something is playing and try again."
+        : "Couldn't access the microphone. Check permissions.");
+      return;
+    }
+
+    mediaStream = stream;
+    streaming = true;
+    streamSource = kind;
+    setStreamUI(true, kind);
+    setLiveCaption("Transcribing live… (first segment loads the model)", true);
+
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    streamCtx = new Ctx({ sampleRate: STREAM_SR });
+    streamSrcNode = streamCtx.createMediaStreamSource(stream);
+    streamNode = streamCtx.createScriptProcessor(4096, 1, 1);
+    streamGain = streamCtx.createGain();
+    streamGain.gain.value = 0; // don't play the audio back (no echo)
+
+    pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
+    streamNode.onaudioprocess = function (e) {
+      if (!streaming) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const chunk = new Float32Array(input); // copy out of the reused buffer
+      let sum = 0;
+      for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+      const rms = Math.sqrt(sum / chunk.length);
+      const ms = (chunk.length / STREAM_SR) * 1000;
+
+      pcmBuf.push(chunk);
+      pcmLen += chunk.length;
+      if (rms < SILENCE_RMS) { silentMs += ms; }
+      else { silentMs = 0; voicedMs += ms; }
+
+      const totalMs = (pcmLen / STREAM_SR) * 1000;
+      if ((silentMs >= SILENCE_HOLD_MS && voicedMs >= MIN_SPEECH_MS) || totalMs >= MAX_SEG_MS) {
+        flushSegment();
+      }
+    };
+
+    streamSrcNode.connect(streamNode);
+    streamNode.connect(streamGain);
+    streamGain.connect(streamCtx.destination);
+  }
+
+  function flushSegment() {
+    if (pcmLen < MIN_SEG_SAMPLES) {
+      if (!streaming) { pcmBuf = []; pcmLen = 0; }
+      return;
+    }
+    const seg = new Float32Array(pcmLen);
+    let off = 0;
+    for (const c of pcmBuf) { seg.set(c, off); off += c.length; }
+    pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
+    segQueue.push(seg);
+    pumpQueue();
+  }
+
+  async function pumpQueue() {
+    if (segInFlight || !segQueue.length) return;
+    segInFlight = true;
+    const seg = segQueue.shift();
+    try {
+      const result = await transcribeInWorker(
+        seg, whisperLang(el.langSelect.value), function () {}, function () {}
+      );
+      const text = (result && (result.text ||
+        (result.chunks || []).map((c) => c.text).join(" "))) || "";
+      const clean = text.trim();
+      if (clean) appendLine(clean);
+    } catch (_) { /* skip a failed segment, keep going */ }
+    segInFlight = false;
+    if (segQueue.length) pumpQueue();
+  }
+
+  function stopStreaming() {
+    if (!streaming) return;
+    streaming = false;
+    if (streamNode) { streamNode.onaudioprocess = null; try { streamNode.disconnect(); } catch (_) {} }
+    if (streamSrcNode) { try { streamSrcNode.disconnect(); } catch (_) {} }
+    if (streamGain) { try { streamGain.disconnect(); } catch (_) {} }
+    if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
+    flushSegment(); // transcribe whatever is left
+    if (streamCtx && streamCtx.close) { try { streamCtx.close(); } catch (_) {} }
+    streamCtx = null; streamSrcNode = null; streamNode = null; streamGain = null; mediaStream = null;
+    setStreamUI(false, streamSource);
+    streamSource = "";
+  }
+
+  function toggleStream(kind) {
+    if (streaming && streamSource === kind) { stopStreaming(); return; }
+    if (streaming) { showToast("Stop the current capture first."); return; }
+    startStreaming(kind);
+  }
+
+  // ---------------------------------------------------------------------------
   // Export / copy / clear
   // ---------------------------------------------------------------------------
   function transcriptToText() {
@@ -819,9 +964,25 @@
     renderSpeakerChips();
     renderTranscript();
 
-    if (!getRecognitionClass()) showUnsupported();
+    if (IS_DESKTOP) {
+      // Desktop app: the Web Speech API isn't available in Electron, so live
+      // capture (mic and system audio) goes through Whisper streaming instead.
+      el.sysAudioBtn.hidden = false;
+      el.recordBtn.disabled = false;
+      el.recordBtn.title = "Transcribe microphone audio live (Whisper)";
+      // macOS/Linux system-audio loopback is OS-dependent; hint it on non-Windows.
+      if (window.meetingSoloDesktop.platform !== "win32") {
+        el.sysAudioBtn.title = "Capture system audio (best on Windows; may need a loopback device on macOS/Linux)";
+      }
+    } else if (!getRecognitionClass()) {
+      showUnsupported();
+    }
 
-    el.recordBtn.addEventListener("click", toggleRecording);
+    el.recordBtn.addEventListener("click", function () {
+      if (IS_DESKTOP) toggleStream("mic");
+      else toggleRecording();
+    });
+    el.sysAudioBtn.addEventListener("click", function () { toggleStream("system"); });
     el.fileBtn.addEventListener("click", function () {
       if (recording) { showToast("Stop recording before transcribing a file."); return; }
       el.fileInput.click();
@@ -856,7 +1017,9 @@
     document.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        if (!el.recordBtn.disabled) toggleRecording();
+        if (el.recordBtn.disabled) return;
+        if (IS_DESKTOP) toggleStream("mic");
+        else toggleRecording();
         return;
       }
       // Number keys 1-9 select a speaker (when not typing in a field).
@@ -867,7 +1030,7 @@
     });
 
     window.addEventListener("beforeunload", function (e) {
-      if (recording) { e.preventDefault(); e.returnValue = ""; }
+      if (recording || streaming) { e.preventDefault(); e.returnValue = ""; }
     });
   }
 

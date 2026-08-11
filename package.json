@@ -1,0 +1,34 @@
+{
+  "name": "meeting-solo",
+  "version": "1.0.0",
+  "description": "Live captions, translation and copyable transcripts for interviews and meetings — in the browser or as a desktop app that transcribes system audio from any program.",
+  "license": "MIT",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.meetingsolo.app",
+    "productName": "Meeting Solo",
+    "files": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      "worker.js",
+      "vendor/**",
+      "models/**",
+      "electron/**"
+    ],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg", "category": "public.app-category.productivity" },
+    "linux": { "target": "AppImage", "category": "AudioVideo" }
+  }
+}
