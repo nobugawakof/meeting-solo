@@ -52,15 +52,23 @@ Want to caption an interview you already recorded, or a meeting video?
 
 1. Pick the **Language** of the recording.
 2. Click **📁 File** and choose an audio or video file.
-3. The first time, a small speech-recognition model (**Whisper**) downloads to your
-   browser (~tens of MB, cached afterward). A progress bar shows download, then
-   transcription.
+3. **The first time only**, a small speech-recognition model (**Whisper**, ~40 MB)
+   downloads to your browser and is then **cached permanently** — every later
+   transcription skips the download and starts immediately.
 4. When it finishes, every segment drops into the transcript with its timecode.
    Turn on **Translate ⇄** to translate them, and use **Copy** / **Export** as usual.
 
-This runs **100% in your browser** using WebAssembly — the file never leaves your
-device — so it works in **any** modern browser, including Safari and Firefox. Longer
-recordings take longer; a rough guide is a fraction of real-time on a typical laptop.
+The model download and the transcription both run in a **background thread**
+(a Web Worker), so the page stays responsive the whole time — no freezing — and
+**Cancel** stops the work instantly. It all runs **100% in your browser** using
+WebAssembly, so the file never leaves your device and it works in **any** modern
+browser, including Safari and Firefox. Longer recordings take longer; expect a
+fraction of real-time on a typical laptop.
+
+> **Why isn't the model bundled into the app?** It's ~40 MB — bundling it would slow
+> down *every* startup, including for people who only use the live microphone. Instead
+> it's fetched lazily the first time you transcribe a file, then cached by the browser,
+> which keeps the app itself instant to open.
 
 ### Translation & speaker labels — how they work
 
@@ -124,7 +132,8 @@ browser (localStorage). Here's where data goes for each feature:
 ```
 index.html   — markup & layout
 styles.css   — theme-aware styling (light/dark)
-app.js       — live recognition, file transcription, transcript, translation, export
+app.js       — live recognition, transcript, translation, export, UI
+worker.js    — background thread that runs Whisper for file transcription
 ```
 
 ## Roadmap ideas

@@ -63,10 +63,9 @@
   let stoppedByUser = false;
   let restartTimer = null;
 
-  // File transcription (in-browser Whisper via transformers.js)
-  const WHISPER_MODEL = "Xenova/whisper-base";
-  const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
-  let transcriber = null;
+  // File transcription (in-browser Whisper, run in a Web Worker so the UI
+  // never freezes while the model loads or audio is transcribed).
+  let whisperWorker = null;
   let fileToken = 0; // bumped to cancel/ignore an in-flight job
   let processingFile = false;
 
@@ -550,15 +549,48 @@
     else { el.fpFill.classList.remove("indeterminate"); }
   }
 
-  async function ensureTranscriber(onProgress) {
-    if (transcriber) return transcriber;
-    const mod = await import(/* webpackIgnore: true */ TRANSFORMERS_URL);
-    try { mod.env.allowLocalModels = false; } catch (_) {}
-    transcriber = await mod.pipeline("automatic-speech-recognition", WHISPER_MODEL, {
-      quantized: true,
-      progress_callback: onProgress,
+  function getWorker() {
+    if (!whisperWorker) {
+      whisperWorker = new Worker("worker.js", { type: "module" });
+    }
+    return whisperWorker;
+  }
+
+  // Run transcription in the worker. Reports download/load progress, fires
+  // onReady when the model is loaded and inference is starting, and resolves
+  // with the Whisper result. The audio buffer is transferred (zero-copy).
+  function transcribeInWorker(audio, language, onProgress, onReady) {
+    return new Promise((resolve, reject) => {
+      const w = getWorker();
+      const cleanup = () => {
+        w.removeEventListener("message", handler);
+        w.removeEventListener("error", errHandler);
+      };
+      const handler = (event) => {
+        const m = event.data || {};
+        if (m.type === "progress") {
+          onProgress(m.data);
+        } else if (m.type === "ready") {
+          onReady();
+        } else if (m.type === "result") {
+          cleanup();
+          resolve(m.result);
+        } else if (m.type === "error") {
+          cleanup();
+          reject(new Error(m.message || "worker-error"));
+        }
+      };
+      // Fires if the worker script itself fails to load (e.g. the model CDN is
+      // unreachable). Drop the dead worker so the next attempt recreates it.
+      const errHandler = (e) => {
+        cleanup();
+        if (whisperWorker === w) { whisperWorker = null; }
+        reject(new Error("worker-load-failed"));
+      };
+      w.addEventListener("message", handler);
+      w.addEventListener("error", errHandler);
+      w.postMessage({ type: "transcribe", audio: audio, language: language }, [audio.buffer]);
     });
-    return transcriber;
   }
 
   // Decode any browser-playable media into mono 16 kHz PCM (what Whisper needs).
@@ -613,21 +645,11 @@
     el.fileBtn.disabled = true;
     showFileProgress(true);
     setFpIndeterminate(true);
-    setFpText("Loading transcription model… (first run downloads it once)");
+    setFpText(`Decoding “${file.name}”…`);
 
     try {
-      const asr = await ensureTranscriber((p) => {
-        if (!p) return;
-        if (p.status === "progress" && p.file && typeof p.progress === "number") {
-          const name = String(p.file).split("/").pop();
-          setFpFill(Math.round(p.progress));
-          setFpText(`Downloading model — ${name} ${Math.round(p.progress)}%`);
-        }
-      });
-      if (cancelled()) return;
-
-      setFpIndeterminate(true);
-      setFpText(`Decoding “${file.name}”…`);
+      // Decoding is quick; do it on the main thread, then hand the audio to
+      // the worker for the heavy transcription so the UI stays responsive.
       let audio;
       try {
         audio = await decodeAudio(file);
@@ -637,15 +659,23 @@
       if (cancelled()) return;
 
       const mins = Math.round((audio.length / 16000 / 60) * 10) / 10;
-      setFpText(`Transcribing “${file.name}” (~${mins} min of audio)… this can take a while.`);
+      setFpText("Loading transcription model… (one-time download, then cached)");
 
-      const result = await asr(audio, {
-        language: whisperLang(el.langSelect.value),
-        task: "transcribe",
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        return_timestamps: true,
-      });
+      const onProgress = (p) => {
+        if (!p) return;
+        if (p.status === "progress" && p.file && typeof p.progress === "number") {
+          const name = String(p.file).split("/").pop();
+          setFpFill(Math.round(p.progress));
+          setFpText(`Downloading model — ${name} ${Math.round(p.progress)}% (one-time)`);
+        }
+      };
+      const onReady = () => {
+        if (cancelled()) return;
+        setFpIndeterminate(true);
+        setFpText(`Transcribing “${file.name}” (~${mins} min of audio)…`);
+      };
+
+      const result = await transcribeInWorker(audio, whisperLang(el.langSelect.value), onProgress, onReady);
       if (cancelled()) return;
 
       const chunks = result && result.chunks && result.chunks.length
@@ -677,6 +707,12 @@
 
   function cancelFile() {
     fileToken += 1; // invalidate the in-flight job's results
+    // Terminating the worker truly stops in-progress compute (the model files
+    // stay cached by the browser, so the next run starts quickly).
+    if (whisperWorker) {
+      whisperWorker.terminate();
+      whisperWorker = null;
+    }
     showFileProgress(false);
     setFpIndeterminate(false);
     processingFile = false;
