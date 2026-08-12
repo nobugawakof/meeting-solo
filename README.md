@@ -5,8 +5,8 @@
 Meeting Solo turns speech into text in real time — big, readable captions on screen
 plus a full transcript you can copy, export, and keep. It works two ways: **live from
 your microphone**, or by **transcribing a recorded audio/video file** (no microphone
-needed). It supports **English** and **Chinese** (Mandarin, Taiwan, and Cantonese),
-with **English ⇄ Chinese translation** and **speaker labels**.
+needed). It supports **English** and **Simplified Chinese**, with **automatic
+English ⇄ Chinese translation** of every line.
 
 It's built to fix the three frustrating limits of Windows 11 Live Captions:
 
@@ -25,14 +25,13 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 - **Capture system audio (desktop app)** — run Meeting Solo as a desktop app and
   click **🔊 System audio** to transcribe sound from **any program** — Telegram,
   Lark, Zoom, a browser tab — live, without a microphone.
-- **Full scrollable transcript** — every finalized line is kept, with optional timestamps.
-- **English & Chinese** — pick your language from the dropdown.
-- **Live English ⇄ Chinese translation** — turn on **Translate ⇄** and each line is
-  translated beneath the original; direction follows the language you're capturing.
-- **Speaker labels** — tag who's talking with color-coded, renamable speaker chips
-  (great for interviewer / candidate). Click a chip or press keys `1`–`9` to switch.
+- **Full scrollable transcript** — every finalized line is kept as its own line,
+  with optional timestamps.
+- **English & Simplified Chinese** — pick your language from the dropdown.
+- **Automatic English ⇄ Chinese translation** — each line is translated beneath
+  the original; the direction follows the language you selected. No toggle needed.
 - **Copy & Export** — one click to copy everything or download a text file,
-  including speaker names and translations.
+  including translations.
 - **Persistent** — the transcript is saved locally and restored automatically.
 - **Word & line count** — including correct counting for Chinese characters.
 - **Keyboard shortcut** — `Ctrl` / `⌘` + `Enter` to start or stop.
@@ -41,13 +40,11 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 ## How to use
 
 1. Open the app (see below).
-2. Choose your **Language**.
-3. (Optional) Turn on **Translate ⇄** for live English ⇄ Chinese translation.
-4. (Optional) Set up **speakers** — rename the chips (double-click) and click one, or
-   press `1`–`9`, to mark who's currently talking.
-5. Click **Start** and allow microphone access when prompted.
-6. Speak — captions appear live and finalized lines collect in the transcript.
-7. Use **Copy**, **Export**, or **Clear** at any time.
+2. Choose your **Language** (English or Simplified Chinese). Each line is
+   translated to the other language automatically.
+3. Click **Start** and allow microphone access when prompted.
+4. Speak — captions appear live and finalized lines collect in the transcript.
+5. Use **Copy**, **Export**, or **Clear** at any time.
 
 ### Transcribe a recorded file (no microphone)
 
@@ -58,8 +55,8 @@ Want to caption an interview you already recorded, or a meeting video?
 3. **The first time only**, a small speech-recognition model (**Whisper**, ~40 MB)
    downloads to your browser and is then **cached permanently** — every later
    transcription skips the download and starts immediately.
-4. When it finishes, every segment drops into the transcript with its timecode.
-   Turn on **Translate ⇄** to translate them, and use **Copy** / **Export** as usual.
+4. When it finishes, every segment drops into the transcript with its timecode,
+   translated automatically. Use **Copy** / **Export** as usual.
 
 The model download and the transcription both run in a **background thread**
 (a Web Worker), so the page stays responsive the whole time — no freezing — and
@@ -95,15 +92,14 @@ somewhere the first time:
 > of the box. (Remove the `models/**` rule in `.gitignore` if you want to commit the
 > weights into your own fork.)
 
-### Translation & speaker labels — how they work
+### Translation & transcript lines — how they work
 
-- **Translation** is applied per finalized line. The direction is automatic:
-  English speech is translated to Chinese, Chinese speech to English. Turning the
-  toggle on also translates any earlier lines that don't have a translation yet.
-- **Speaker labels are manual.** True automatic speaker separation (diarization)
-  needs voice fingerprinting the browser's speech API doesn't provide, so instead
-  you tag the active speaker yourself — fast and reliable for interviews and
-  1-on-1s. Every line records whichever speaker was active when it was finalized.
+- **Translation** is automatic and applied per finalized line. The direction
+  follows the selected language: English is translated to Chinese, Chinese to
+  English. No toggle — it just happens.
+- **One line per utterance.** The transcript separates content by line breaks;
+  there are no speaker labels. (The browser/Whisper pipeline can't reliably tell
+  voices apart, so manual speaker tagging isn't worth the friction.)
 
 ### Run it
 
@@ -140,7 +136,7 @@ npm start        # launches the desktop app
 
 Then click **🔊 System audio**, and Meeting Solo transcribes whatever is playing
 on your computer — a Telegram call, a Lark meeting, a video — into the transcript,
-with the same translation, speaker labels, copy and export.
+with the same automatic translation, copy and export.
 
 ### Build an installer
 
@@ -160,9 +156,8 @@ for that release. **The CI installer bundles the Whisper model**, so it works
 
 - **Live preview** — while you speak, an evolving draft of the current sentence
   shows in the caption bar; the finished line drops into the transcript on a pause.
-- **Auto-speaker** — tick **Auto** next to the speakers to switch the active
-  speaker automatically after a longer pause (handy for 2-person calls). It's a
-  pause-based heuristic, so you can still correct it by clicking a speaker chip.
+- **Hallucination guard** — Whisper sometimes repeats a phrase on music or
+  near-silence (e.g. "字幕: 字幕: …"); repeated runs are automatically collapsed.
 
 ### How it works & platform notes
 
@@ -208,10 +203,12 @@ browser (localStorage). Here's where data goes for each feature:
 - **Live microphone captions** — the Web Speech API in Chrome/Edge sends microphone
   audio to the browser vendor's speech service to turn it into text. This is how the
   browser's built-in speech recognition works everywhere.
-- **Translation (only when the Translate toggle is on)** — each finalized line of
-  text is sent to a public translation service (Google Translate's free endpoint,
-  with MyMemory as a fallback) and the translation is sent back. With translation
-  **off**, no transcript text leaves your browser through this app.
+- **Translation** — each finalized line of text is sent to a public translation
+  service (Google Translate's free endpoint, with MyMemory as a fallback) and the
+  translation is sent back. This is the one feature that sends transcript text off
+  your device. (Note: Google Translate is blocked in some regions; the MyMemory
+  fallback is used automatically, and if both are unreachable the line simply shows
+  "translation unavailable" while the original transcript is unaffected.)
 
 ## Project structure
 
@@ -229,7 +226,6 @@ package.json            — Electron dependencies & build config
 
 ## Roadmap ideas
 
-- Automatic speaker separation (diarization) from the audio
 - Sync the file transcript with a video player (click a line to jump to that moment)
 - Larger Whisper model option for higher accuracy on tough audio
 - Export to Markdown, `.srt`, and `.vtt`

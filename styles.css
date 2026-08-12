@@ -311,6 +311,22 @@ body {
   line-height: 1.65;
   scroll-behavior: smooth;
 }
+
+/* Custom scrollbars (instead of the default OS scrollbar) */
+* {
+  scrollbar-width: thin;                        /* Firefox */
+  scrollbar-color: var(--border) transparent;   /* Firefox: thumb, track */
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 .transcript:empty::before {
   content: "Finalized lines will collect here. You can select, copy, and export everything — nothing is dropped.";
   color: var(--text-muted);

@@ -43,20 +43,13 @@
       <label class="field">
         <span class="field-label">Language</span>
         <select id="langSelect" class="select">
-          <option value="en-US">English (US)</option>
-          <option value="en-GB">English (UK)</option>
-          <option value="zh-CN">中文 (简体, Mandarin)</option>
-          <option value="zh-TW">中文 (繁體, Taiwan)</option>
-          <option value="zh-HK">中文 (廣東話, Cantonese)</option>
+          <option value="en-US">English</option>
+          <option value="zh-CN">中文 (简体)</option>
         </select>
       </label>
 
       <div class="controls-spacer"></div>
 
-      <label class="toggle" title="Translate each line between English and Chinese">
-        <input type="checkbox" id="translateToggle" />
-        <span>Translate ⇄</span>
-      </label>
       <label class="toggle" title="Add a timestamp to each new line">
         <input type="checkbox" id="timestampToggle" />
         <span>Timestamps</span>
@@ -65,18 +58,6 @@
       <button id="copyBtn" class="btn" type="button" disabled>Copy</button>
       <button id="exportBtn" class="btn" type="button" disabled>Export</button>
       <button id="clearBtn" class="btn btn-danger" type="button" disabled>Clear</button>
-    </section>
-
-    <!-- Speakers -->
-    <section class="speaker-bar" aria-label="Speakers">
-      <span class="speaker-bar-label">Speaker</span>
-      <div id="speakerChips" class="speaker-chips"></div>
-      <button id="addSpeakerBtn" class="btn btn-sm" type="button" title="Add another speaker">+ Add</button>
-      <label class="toggle" title="During live capture, switch speaker automatically after a long pause">
-        <input type="checkbox" id="autoSpeakerToggle" />
-        <span>Auto</span>
-      </label>
-      <span class="speaker-hint">click to set who's talking · double-click to rename · keys 1–9</span>
     </section>
 
     <!-- File transcription progress -->

@@ -13,12 +13,15 @@
  * bundled ./models/ folder.
  */
 
-const { app, BrowserWindow, desktopCapturer, shell } = require("electron");
+const { app, BrowserWindow, Menu, desktopCapturer, shell } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
+
+// No native menu bar (File / Edit / View / Window / Help).
+Menu.setApplicationMenu(null);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

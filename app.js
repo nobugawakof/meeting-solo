@@ -1,11 +1,9 @@
 /* Meeting Solo — Live Captions, Translation & Transcript
  *
- * Real-time speech-to-text using the browser's Web Speech API, with:
- *   - Unlimited transcript (every finalized line is kept)
- *   - Copy & export (clipboard / .txt download)
- *   - Persistence (auto-saved to localStorage)
- *   - Live English <-> Chinese translation (public translation services)
- *   - Manual speaker labels (color-coded, renamable)
+ *   - Unlimited transcript (every finalized line is kept), one line per utterance
+ *   - Automatic English <-> Chinese translation based on the selected language
+ *   - Copy & export (clipboard / .txt), persistence (localStorage)
+ *   - File transcription and (desktop) live capture via Whisper in a Web Worker
  */
 
 (function () {
@@ -14,12 +12,6 @@
   const STORAGE_KEY = "meeting-solo.state.v2";
   const LEGACY_KEY = "meeting-solo.transcript.v1";
   const PREFS_KEY = "meeting-solo.prefs.v1";
-
-  const SPEAKER_COLORS = [
-    "#2563eb", "#db2777", "#16a34a", "#d97706",
-    "#7c3aed", "#0891b2", "#dc2626", "#4b5563",
-  ];
-  const MAX_SPEAKERS = 9;
 
   // --- DOM references ---
   const el = {
@@ -34,14 +26,10 @@
     fpFill: document.getElementById("fpFill"),
     fpCancel: document.getElementById("fpCancel"),
     langSelect: document.getElementById("langSelect"),
-    translateToggle: document.getElementById("translateToggle"),
     timestampToggle: document.getElementById("timestampToggle"),
     copyBtn: document.getElementById("copyBtn"),
     exportBtn: document.getElementById("exportBtn"),
     clearBtn: document.getElementById("clearBtn"),
-    speakerChips: document.getElementById("speakerChips"),
-    addSpeakerBtn: document.getElementById("addSpeakerBtn"),
-    autoSpeakerToggle: document.getElementById("autoSpeakerToggle"),
     liveCaption: document.getElementById("liveCaption"),
     transcript: document.getElementById("transcript"),
     stats: document.getElementById("stats"),
@@ -52,14 +40,8 @@
   };
 
   // --- State ---
-  /** @type {{time:string, text:string, speaker:string, lang:string, translation:?string, _node?:Element, _translating?:boolean, _failed?:boolean}[]} */
+  /** @type {{time:string, text:string, lang:string, translation:?string, _node?:Element, _translating?:boolean, _failed?:boolean}[]} */
   let lines = [];
-  let speakers = [
-    { id: "s1", name: "Speaker 1", color: SPEAKER_COLORS[0] },
-    { id: "s2", name: "Speaker 2", color: SPEAKER_COLORS[1] },
-  ];
-  let activeSpeakerId = "s1";
-  let speakerSeq = 2;
 
   let recognition = null;
   let recording = false;
@@ -83,16 +65,25 @@
   const MIN_SEG_SAMPLES = STREAM_SR * 0.4;
   const INTERIM_MIN_MS = 800;     // min voiced audio before showing a live preview
   const INTERIM_THROTTLE_MS = 1000; // don't preview more often than this
-  const TURN_GAP_MS = 900;        // silence longer than this => likely a new speaker
   let streaming = false;
   let streamSource = "";          // "mic" | "system"
   let streamCtx = null, streamNode = null, streamSrcNode = null, streamGain = null;
   let mediaStream = null;
   let pcmBuf = [], pcmLen = 0, silentMs = 0, voicedMs = 0;
   let segQueue = [], workerBusy = false;
-  let nextSegPrecededByGap = false; // did a long pause precede the next segment?
-  let lastInterimAt = 0;            // performance.now() of the last live preview
-  let autoSpeaker = false;          // auto-advance speaker on long pauses
+  let lastInterimAt = 0;          // performance.now() of the last live preview
+
+  // ---------------------------------------------------------------------------
+  // Text cleanup
+  // ---------------------------------------------------------------------------
+  // Whisper can hallucinate on music/near-silence, emitting a short unit over and
+  // over (e.g. "字幕: 字幕: 字幕: …" or "Subtitles: Subtitles: …"). Collapse any
+  // short unit repeated 3+ times down to a single occurrence.
+  function collapseRepeats(text) {
+    if (!text) return "";
+    let s = String(text).replace(/(.{1,20}?)\1{2,}/gs, "$1");
+    return s.trim();
+  }
 
   // ---------------------------------------------------------------------------
   // Persistence
@@ -101,49 +92,35 @@
     let loaded = null;
     try { loaded = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch (_) {}
 
-    if (loaded && Array.isArray(loaded.speakers) && loaded.speakers.length) {
-      lines = Array.isArray(loaded.lines) ? loaded.lines : [];
-      speakers = loaded.speakers;
-      activeSpeakerId = loaded.activeSpeakerId || speakers[0].id;
-      speakerSeq = loaded.speakerSeq || speakers.length;
+    if (loaded && Array.isArray(loaded.lines)) {
+      lines = loaded.lines;
+    } else if (Array.isArray(loaded)) {
+      lines = loaded;
     } else {
-      // Migrate legacy v1 (a plain array of {time, text}).
       try {
         const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || "null");
         if (Array.isArray(legacy)) lines = legacy;
       } catch (_) {}
     }
 
-    // Ensure every line has valid fields.
     for (const line of lines) {
-      if (!line.speaker || !speakers.some((s) => s.id === line.speaker)) {
-        line.speaker = speakers[0].id;
-      }
       if (!line.lang) line.lang = "en-US";
       if (!("translation" in line)) line.translation = null;
     }
-    if (!speakers.some((s) => s.id === activeSpeakerId)) activeSpeakerId = speakers[0].id;
 
     try {
       const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
       if (prefs.lang) el.langSelect.value = prefs.lang;
       if (typeof prefs.timestamps === "boolean") el.timestampToggle.checked = prefs.timestamps;
-      if (typeof prefs.translate === "boolean") el.translateToggle.checked = prefs.translate;
-      if (typeof prefs.autoSpeaker === "boolean") el.autoSpeakerToggle.checked = prefs.autoSpeaker;
     } catch (_) {}
-    autoSpeaker = el.autoSpeakerToggle.checked;
   }
 
   function saveState() {
     try {
       const cleanLines = lines.map((l) => ({
-        time: l.time, text: l.text, speaker: l.speaker,
-        lang: l.lang, translation: l.translation || null,
+        time: l.time, text: l.text, lang: l.lang, translation: l.translation || null,
       }));
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ lines: cleanLines, speakers, activeSpeakerId, speakerSeq })
-      );
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ lines: cleanLines }));
     } catch (_) {}
   }
 
@@ -152,85 +129,12 @@
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         lang: el.langSelect.value,
         timestamps: el.timestampToggle.checked,
-        translate: el.translateToggle.checked,
-        autoSpeaker: el.autoSpeakerToggle.checked,
       }));
     } catch (_) {}
   }
 
   // ---------------------------------------------------------------------------
-  // Speakers
-  // ---------------------------------------------------------------------------
-  function getSpeaker(id) {
-    return speakers.find((s) => s.id === id) || speakers[0];
-  }
-
-  function renderSpeakerChips() {
-    el.speakerChips.innerHTML = "";
-    for (let i = 0; i < speakers.length; i++) {
-      const s = speakers[i];
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "chip" + (s.id === activeSpeakerId ? " is-active" : "");
-      chip.dataset.id = s.id;
-      chip.title = `Set active speaker (key ${i + 1}) · double-click to rename`;
-      if (s.id === activeSpeakerId) {
-        chip.style.background = s.color;
-        chip.style.borderColor = s.color;
-      } else {
-        chip.style.background = "";
-        chip.style.borderColor = "";
-      }
-
-      const dot = document.createElement("span");
-      dot.className = "chip-dot";
-      dot.style.background = s.id === activeSpeakerId ? "#fff" : s.color;
-      chip.appendChild(dot);
-
-      const name = document.createElement("span");
-      name.textContent = s.name;
-      chip.appendChild(name);
-
-      chip.addEventListener("click", () => setActiveSpeaker(s.id));
-      chip.addEventListener("dblclick", (e) => { e.preventDefault(); renameSpeaker(s.id); });
-      el.speakerChips.appendChild(chip);
-    }
-    el.addSpeakerBtn.disabled = speakers.length >= MAX_SPEAKERS;
-  }
-
-  function setActiveSpeaker(id) {
-    activeSpeakerId = id;
-    renderSpeakerChips();
-    saveState();
-  }
-
-  function addSpeaker() {
-    if (speakers.length >= MAX_SPEAKERS) return;
-    speakerSeq += 1;
-    const idx = speakers.length;
-    speakers.push({
-      id: "s" + speakerSeq,
-      name: "Speaker " + (idx + 1),
-      color: SPEAKER_COLORS[idx % SPEAKER_COLORS.length],
-    });
-    renderSpeakerChips();
-    saveState();
-  }
-
-  function renameSpeaker(id) {
-    const s = getSpeaker(id);
-    const name = window.prompt("Speaker name:", s.name);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    s.name = trimmed;
-    renderSpeakerChips();
-    renderTranscript();
-    saveState();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Translation
+  // Translation (automatic, based on the selected language)
   // ---------------------------------------------------------------------------
   function translationPair(lang) {
     // English <-> Chinese, direction chosen by the captured language.
@@ -274,7 +178,6 @@
   }
 
   async function translateLine(line) {
-    if (!el.translateToggle.checked) return;
     const pair = translationPair(line.lang);
     line._translating = true;
     line._failed = false;
@@ -290,7 +193,6 @@
 
   async function translateMissing() {
     for (const line of lines) {
-      if (!el.translateToggle.checked) break;
       if (line.translation) continue;
       await translateLine(line);
     }
@@ -306,10 +208,8 @@
   }
 
   function buildLineNode(line) {
-    const speaker = getSpeaker(line.speaker);
     const row = document.createElement("div");
     row.className = "line";
-    row.style.borderLeftColor = speaker.color;
 
     if (el.timestampToggle.checked && line.time) {
       const t = document.createElement("span");
@@ -321,18 +221,12 @@
     const body = document.createElement("div");
     body.className = "line-body";
 
-    const sp = document.createElement("span");
-    sp.className = "line-speaker";
-    sp.style.color = speaker.color;
-    sp.textContent = speaker.name + ":";
-    body.appendChild(sp);
-
     const txt = document.createElement("span");
     txt.className = "line-text";
     txt.textContent = line.text;
     body.appendChild(txt);
 
-    if (el.translateToggle.checked && (line.translation || line._translating || line._failed)) {
+    if (line.translation || line._translating || line._failed) {
       const tr = document.createElement("div");
       tr.className = "line-translation";
       if (line._translating) {
@@ -378,12 +272,11 @@
   }
 
   function appendLine(text) {
-    const clean = text.trim();
+    const clean = collapseRepeats((text || "").trim());
     if (!clean) return;
     const line = {
       time: nowLabel(),
       text: clean,
-      speaker: activeSpeakerId,
       lang: el.langSelect.value,
       translation: null,
     };
@@ -397,7 +290,7 @@
     updateStats();
     updateButtonStates();
     saveState();
-    if (el.translateToggle.checked) translateLine(line);
+    translateLine(line);
   }
 
   function countWords() {
@@ -405,8 +298,8 @@
     for (const line of lines) {
       const t = (line.text || "").trim();
       if (!t) continue;
-      const cjk = (t.match(/[㐀-鿿豈-﫿]/g) || []).length;
-      const rest = t.replace(/[㐀-鿿豈-﫿]/g, " ").trim();
+      const cjk = (t.match(/[㐀-鿿豈-﫿]/g) || []).length;
+      const rest = t.replace(/[㐀-鿿豈-﫿]/g, " ").trim();
       const latin = rest ? rest.split(/\s+/).filter(Boolean).length : 0;
       words += cjk + latin;
     }
@@ -458,7 +351,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Speech recognition
+  // Speech recognition (browser microphone via Web Speech API)
   // ---------------------------------------------------------------------------
   function getRecognitionClass() {
     return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -551,7 +444,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // File transcription — Whisper running in the browser (no microphone, no server)
+  // File transcription — Whisper running locally (no microphone, no server)
   // ---------------------------------------------------------------------------
   function whisperLang(lang) {
     return lang && lang.toLowerCase().indexOf("zh") === 0 ? "chinese" : "english";
@@ -608,8 +501,6 @@
           reject(new Error(m.message || "worker-error"));
         }
       };
-      // Fires if the worker script itself fails to load (e.g. the model CDN is
-      // unreachable). Drop the dead worker so the next attempt recreates it.
       const errHandler = (e) => {
         cleanup();
         if (whisperWorker === w) { whisperWorker = null; }
@@ -646,13 +537,12 @@
   function addFileLines(chunks) {
     let added = 0;
     for (const c of chunks) {
-      const text = (c.text || "").trim();
+      const text = collapseRepeats((c.text || "").trim());
       if (!text) continue;
       const start = c.timestamp && c.timestamp[0] != null ? c.timestamp[0] : 0;
       lines.push({
         time: secondsToLabel(start),
         text: text,
-        speaker: activeSpeakerId,
         lang: el.langSelect.value,
         translation: null,
       });
@@ -677,8 +567,6 @@
     setFpText(`Decoding “${file.name}”…`);
 
     try {
-      // Decoding is quick; do it on the main thread, then hand the audio to
-      // the worker for the heavy transcription so the UI stays responsive.
       let audio;
       try {
         audio = await decodeAudio(file);
@@ -715,7 +603,7 @@
       showFileProgress(false);
       if (added > 0) {
         showToast(`Transcribed ${added} segment${added === 1 ? "" : "s"} from ${file.name}`);
-        if (el.translateToggle.checked) translateMissing();
+        translateMissing();
       } else {
         showToast("No speech was detected in that file.");
       }
@@ -737,8 +625,6 @@
 
   function cancelFile() {
     fileToken += 1; // invalidate the in-flight job's results
-    // Terminating the worker truly stops in-progress compute (the model files
-    // stay cached by the browser, so the next run starts quickly).
     if (whisperWorker) {
       whisperWorker.terminate();
       whisperWorker = null;
@@ -764,7 +650,6 @@
     if (el.sysAudioLabel) el.sysAudioLabel.textContent = sysActive ? "Stop" : "System audio";
     el.langSelect.disabled = on;
     el.fileBtn.disabled = on;
-    // Only the active capture button stays enabled while streaming.
     el.recordBtn.disabled = on && !micActive;
     el.sysAudioBtn.disabled = on && !sysActive;
     if (on) {
@@ -807,7 +692,7 @@
     streamGain.gain.value = 0; // don't play the audio back (no echo)
 
     pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
-    segQueue = []; workerBusy = false; nextSegPrecededByGap = false; lastInterimAt = 0;
+    segQueue = []; workerBusy = false; lastInterimAt = 0;
 
     streamNode.onaudioprocess = function (e) {
       if (!streaming) return;
@@ -827,8 +712,7 @@
       const silenceEnd = silentMs >= SILENCE_HOLD_MS && voicedMs >= MIN_SPEECH_MS;
       const hardCap = totalMs >= MAX_SEG_MS;
       if (silenceEnd || hardCap) {
-        // A long trailing silence suggests the *next* segment is a new speaker.
-        flushSegment(silenceEnd && silentMs >= TURN_GAP_MS);
+        flushSegment();
       } else {
         dispatch(); // maybe render a live interim preview
       }
@@ -852,24 +736,15 @@
       (result.chunks || []).map((c) => c.text).join(" "))) || "";
   }
 
-  function flushSegment(precededGapForNext) {
+  function flushSegment() {
     if (pcmLen < MIN_SEG_SAMPLES) {
       if (!streaming) { pcmBuf = []; pcmLen = 0; }
       return;
     }
     const seg = snapshotPcm();
-    const gap = nextSegPrecededByGap;
     pcmBuf = []; pcmLen = 0; silentMs = 0; voicedMs = 0;
-    nextSegPrecededByGap = !!precededGapForNext;
-    segQueue.push({ audio: seg, gap: gap });
+    segQueue.push(seg);
     dispatch();
-  }
-
-  function advanceSpeaker() {
-    if (speakers.length < 2) return;
-    const i = speakers.findIndex((s) => s.id === activeSpeakerId);
-    const next = speakers[(i + 1) % speakers.length];
-    setActiveSpeaker(next.id);
   }
 
   // One worker job at a time. Finalized segments (which append transcript lines)
@@ -880,16 +755,13 @@
 
     if (segQueue.length) {
       workerBusy = true;
-      const job = segQueue.shift();
+      const seg = segQueue.shift();
       try {
         const result = await transcribeInWorker(
-          job.audio, whisperLang(el.langSelect.value), function () {}, function () {}
+          seg, whisperLang(el.langSelect.value), function () {}, function () {}
         );
-        const clean = resultText(result).trim();
-        if (clean) {
-          if (autoSpeaker && job.gap) advanceSpeaker();
-          appendLine(clean);
-        }
+        const txt = resultText(result);
+        if (txt.trim()) appendLine(txt);
       } catch (_) { /* skip a failed segment */ }
       workerBusy = false;
       dispatch();
@@ -908,7 +780,7 @@
         const result = await transcribeInWorker(
           snap, whisperLang(el.langSelect.value), function () {}, function () {}
         );
-        const clean = resultText(result).trim();
+        const clean = collapseRepeats(resultText(result).trim());
         if (streaming && clean && !segQueue.length) setLiveCaption(clean, true);
       } catch (_) {}
       workerBusy = false;
@@ -923,7 +795,7 @@
     if (streamSrcNode) { try { streamSrcNode.disconnect(); } catch (_) {} }
     if (streamGain) { try { streamGain.disconnect(); } catch (_) {} }
     if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
-    flushSegment(false); // transcribe whatever is left
+    flushSegment(); // transcribe whatever is left
     if (streamCtx && streamCtx.close) { try { streamCtx.close(); } catch (_) {} }
     streamCtx = null; streamSrcNode = null; streamNode = null; streamGain = null; mediaStream = null;
     setStreamUI(false, streamSource);
@@ -941,13 +813,11 @@
   // ---------------------------------------------------------------------------
   function transcriptToText() {
     const showTime = el.timestampToggle.checked;
-    const showTr = el.translateToggle.checked;
     const out = [];
     for (const line of lines) {
-      const speaker = getSpeaker(line.speaker).name;
       const prefix = showTime && line.time ? `[${line.time}] ` : "";
-      out.push(`${prefix}${speaker}: ${line.text}`);
-      if (showTr && line.translation) out.push(`    ↳ ${line.translation}`);
+      out.push(`${prefix}${line.text}`);
+      if (line.translation) out.push(`    ↳ ${line.translation}`);
     }
     return out.join("\n");
   }
@@ -1022,16 +892,11 @@
     setStatus("idle", "Not supported");
   }
 
-  function isTypingTarget(t) {
-    return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
-  }
-
   // ---------------------------------------------------------------------------
   // Wiring
   // ---------------------------------------------------------------------------
   function init() {
     loadState();
-    renderSpeakerChips();
     renderTranscript();
 
     if (IS_DESKTOP) {
@@ -1040,7 +905,6 @@
       el.sysAudioBtn.hidden = false;
       el.recordBtn.disabled = false;
       el.recordBtn.title = "Transcribe microphone audio live (Whisper)";
-      // macOS/Linux system-audio loopback is OS-dependent; hint it on non-Windows.
       if (window.meetingSoloDesktop.platform !== "win32") {
         el.sysAudioBtn.title = "Capture system audio (best on Windows; may need a loopback device on macOS/Linux)";
       }
@@ -1054,7 +918,7 @@
     });
     el.sysAudioBtn.addEventListener("click", function () { toggleStream("system"); });
     el.fileBtn.addEventListener("click", function () {
-      if (recording) { showToast("Stop recording before transcribing a file."); return; }
+      if (recording || streaming) { showToast("Stop the current capture before transcribing a file."); return; }
       el.fileInput.click();
     });
     el.fileInput.addEventListener("change", function () {
@@ -1066,11 +930,6 @@
     el.copyBtn.addEventListener("click", copyTranscript);
     el.exportBtn.addEventListener("click", exportTranscript);
     el.clearBtn.addEventListener("click", clearTranscript);
-    el.addSpeakerBtn.addEventListener("click", addSpeaker);
-    el.autoSpeakerToggle.addEventListener("change", function () {
-      autoSpeaker = el.autoSpeakerToggle.checked;
-      savePrefs();
-    });
 
     el.langSelect.addEventListener("change", function () {
       savePrefs();
@@ -1082,24 +941,12 @@
       renderTranscript();
     });
 
-    el.translateToggle.addEventListener("change", function () {
-      savePrefs();
-      renderTranscript();
-      if (el.translateToggle.checked) translateMissing();
-    });
-
     document.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         if (el.recordBtn.disabled) return;
         if (IS_DESKTOP) toggleStream("mic");
         else toggleRecording();
-        return;
-      }
-      // Number keys 1-9 select a speaker (when not typing in a field).
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-9]$/.test(e.key) && !isTypingTarget(e.target)) {
-        const idx = parseInt(e.key, 10) - 1;
-        if (idx < speakers.length) { setActiveSpeaker(speakers[idx].id); }
       }
     });
 
