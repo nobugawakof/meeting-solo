@@ -153,7 +153,8 @@ Or **download a pre-built installer from CI**: every push to the app builds the
 Windows installer via GitHub Actions
 ([`.github/workflows/build-desktop.yml`](.github/workflows/build-desktop.yml)) —
 grab it from the run's **Artifacts**, or publish a GitHub Release to build it
-for that release.
+for that release. **The CI installer bundles the Whisper model**, so it works
+**fully offline** out of the box — no first-run download.
 
 ### Live transcription niceties
 
@@ -176,7 +177,10 @@ for that release.
 - **Linux:** uses the PulseAudio monitor source.
 - For the best desktop experience, vendor the model locally first
   (`bash scripts/fetch-model.sh`) so live transcription starts instantly and works
-  fully offline.
+  fully offline. (The CI-built installer already includes it.)
+- Internally the desktop app serves its own files over a private
+  `http://127.0.0.1` origin, so microphone/system-audio capture, the clipboard,
+  and the offline model all work the same as in a browser.
 
 > **Note:** live streaming transcription trades a little latency for accuracy — a
 > line appears a moment after each pause in speech, not word-by-word. This is the

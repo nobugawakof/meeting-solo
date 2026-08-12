@@ -37,6 +37,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Bundle Whisper model (offline)
+        shell: bash
+        run: bash scripts/fetch-model.sh
+        env:
+          # HuggingFace is reachable from GitHub-hosted runners; pull straight
+          # from the origin so the installer ships fully self-contained.
+          HF_ENDPOINT: https://huggingface.co
+
       - name: Build Windows installer
         run: npm run dist:win
         env:
