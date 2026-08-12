@@ -618,11 +618,13 @@
   async function dispatch() {
     if (workerBusy) return;
 
+    // Live capture always uses the fast model so it can keep up in real time.
+    // (The Accuracy selector applies to file transcription, where speed is fine.)
     if (segQueue.length) {
       workerBusy = true;
       const seg = segQueue.shift();
       try {
-        const result = await transcribeInWorker(seg, whisperLang(el.langSelect.value), currentModel(), function () {}, function () {});
+        const result = await transcribeInWorker(seg, whisperLang(el.langSelect.value), FAST_MODEL, function () {}, function () {});
         const txt = resultText(result);
         if (txt.trim()) appendLine(txt);
       } catch (_) {}
@@ -631,9 +633,7 @@
       return;
     }
 
-    // Live interim previews add extra work; only run them with the Fast model so
-    // the accurate model isn't slowed down (finalized lines still update on pauses).
-    if (!streaming || currentModel() !== FAST_MODEL) return;
+    if (!streaming) return;
     const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
     const bufferedMs = (pcmLen / STREAM_SR) * 1000;
     if (voicedMs >= INTERIM_MIN_MS && bufferedMs >= INTERIM_MIN_MS &&
@@ -642,7 +642,7 @@
       workerBusy = true;
       const snap = snapshotPcm();
       try {
-        const result = await transcribeInWorker(snap, whisperLang(el.langSelect.value), currentModel(), function () {}, function () {});
+        const result = await transcribeInWorker(snap, whisperLang(el.langSelect.value), FAST_MODEL, function () {}, function () {});
         const clean = cleanText(resultText(result));
         if (streaming && clean && !segQueue.length) setInterim(clean);
       } catch (_) {}

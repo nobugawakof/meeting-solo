@@ -33,9 +33,10 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 - **English & Simplified Chinese** — pick your language from the dropdown; the
   transcript stays in that language. (Chinese output is always converted to
   **Simplified** with OpenCC, since Whisper tends to emit Traditional.)
-- **Accuracy setting** — choose **High** (the `whisper-small` model, default —
-  noticeably better, especially for Chinese) or **Fast** (`whisper-base`, quicker
-  but rougher).
+- **Accuracy setting (files)** — choose **High** (`whisper-small`, default — better,
+  especially for Chinese) or **Fast** (`whisper-base`). **Live capture always uses
+  the fast model** so it keeps up in real time. Both models are bundled in the
+  installer, so nothing downloads at runtime.
 - **Copy & Export** — one click to copy everything or download a text file.
 - **Persistent** — the transcript is saved locally and restored automatically.
 - **Word & line count** — including correct counting for Chinese characters.
@@ -179,6 +180,10 @@ for that release. **The CI installer bundles the Whisper model**, so it works
 - For the best desktop experience, vendor the model locally first
   (`bash scripts/fetch-model.sh`) so live transcription starts instantly and works
   fully offline. (The CI-built installer already includes it.)
+- **Speed:** the desktop app runs the ONNX Runtime on **multiple threads** (it
+  serves itself cross-origin-isolated to unlock SharedArrayBuffer), which is what
+  makes real-time capture keep up. Live capture uses `whisper-base`; larger models
+  are reserved for file transcription.
 - Internally the desktop app serves its own files over a private
   `http://127.0.0.1` origin, so microphone/system-audio capture, the clipboard,
   and the offline model all work the same as in a browser.

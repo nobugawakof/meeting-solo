@@ -29,8 +29,11 @@ const DEFAULT_MODEL = "Xenova/whisper-small";
 
 // Serve the ONNX-Runtime WASM from this project instead of a CDN.
 env.backends.onnx.wasm.wasmPaths = new URL("./vendor/transformers/", self.location).href;
-// A plain static server isn't cross-origin isolated, so run single-threaded.
-env.backends.onnx.wasm.numThreads = 1;
+// Use multiple threads when the page is cross-origin isolated (desktop app sets
+// COOP/COEP for this); otherwise fall back to a single thread. Multi-threading is
+// several times faster, which is what makes real-time capture keep up.
+const cores = (self.navigator && self.navigator.hardwareConcurrency) || 2;
+env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, Math.max(1, cores - 1)) : 1;
 
 // Try ./models/ first (fully offline); otherwise fall back to the mirror.
 env.allowLocalModels = true;

@@ -58,7 +58,15 @@ function startServer() {
       fs.readFile(filePath, (err, data) => {
         if (err) { res.writeHead(404); res.end("Not found"); return; }
         const ext = path.extname(filePath).toLowerCase();
-        res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+        res.writeHead(200, {
+          "Content-Type": MIME[ext] || "application/octet-stream",
+          // Cross-origin isolation enables SharedArrayBuffer, which lets the
+          // ONNX Runtime run Whisper on multiple threads (much faster). All app
+          // resources are same-origin, so this is safe.
+          "Cross-Origin-Opener-Policy": "same-origin",
+          "Cross-Origin-Embedder-Policy": "require-corp",
+          "Cross-Origin-Resource-Policy": "same-origin",
+        });
         res.end(data);
       });
     });
