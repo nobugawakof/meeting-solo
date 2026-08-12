@@ -328,10 +328,20 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 .transcript:empty::before {
-  content: "Finalized lines will collect here. You can select, copy, and export everything — nothing is dropped.";
+  content: "Press Start — your words appear here in real time, and every line is kept. You can select, copy, and export everything.";
   color: var(--text-muted);
   font-size: 0.92rem;
 }
+
+/* The live, still-being-spoken line (replaced by the finalized line) */
+.line-interim { opacity: 0.65; }
+.line-interim .line-text { font-style: italic; }
+.line-interim .line-text::after {
+  content: "▋";
+  margin-left: 2px;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
 
 .line {
   margin: 0 0 0.7rem;

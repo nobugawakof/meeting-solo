@@ -5,8 +5,9 @@
 Meeting Solo turns speech into text in real time — big, readable captions on screen
 plus a full transcript you can copy, export, and keep. It works two ways: **live from
 your microphone**, or by **transcribing a recorded audio/video file** (no microphone
-needed). It supports **English** and **Simplified Chinese**, with **automatic
-English ⇄ Chinese translation** of every line.
+needed). It supports **English** and **Simplified Chinese**. One **Start** button
+captures everything — your microphone *and* any app's audio (Meet, Lark, Telegram,
+Zoom, a media player).
 
 It's built to fix the three frustrating limits of Windows 11 Live Captions:
 
@@ -18,20 +19,20 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 
 ## Features
 
-- **Real-time captions** — a large live caption bar shows words as you speak.
+- **One-button capture** — **Start** captures everything at once: your microphone
+  **and** your computer's audio, so it transcribes any meeting or media — Google
+  Meet, Lark, Telegram, Zoom, a video player — with no setup. (System-audio capture
+  needs the desktop app; in a browser, Start uses the microphone.)
 - **Transcribe recorded files** — click **📁 File** to caption an existing audio or
-  video recording (mp3, wav, m4a, mp4, webm…). Runs entirely in your browser — the
-  file is never uploaded. No microphone required.
-- **Capture system audio (desktop app)** — run Meeting Solo as a desktop app and
-  click **🔊 System audio** to transcribe sound from **any program** — Telegram,
-  Lark, Zoom, a browser tab — live, without a microphone.
+  video recording (mp3, wav, m4a, mp4, webm…). Runs fully on-device — the file is
+  never uploaded.
+- **Live in the transcript** — words appear as you speak, right in the transcript;
+  the still-being-spoken line shows dimmed until it finalizes.
 - **Full scrollable transcript** — every finalized line is kept as its own line,
   with optional timestamps.
-- **English & Simplified Chinese** — pick your language from the dropdown.
-- **Automatic English ⇄ Chinese translation** — each line is translated beneath
-  the original; the direction follows the language you selected. No toggle needed.
-- **Copy & Export** — one click to copy everything or download a text file,
-  including translations.
+- **English & Simplified Chinese** — pick your language from the dropdown; the
+  transcript stays in that language.
+- **Copy & Export** — one click to copy everything or download a text file.
 - **Persistent** — the transcript is saved locally and restored automatically.
 - **Word & line count** — including correct counting for Chinese characters.
 - **Keyboard shortcut** — `Ctrl` / `⌘` + `Enter` to start or stop.
@@ -40,23 +41,23 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 ## How to use
 
 1. Open the app (see below).
-2. Choose your **Language** (English or Simplified Chinese). Each line is
-   translated to the other language automatically.
-3. Click **Start** and allow microphone access when prompted.
-4. Speak — captions appear live and finalized lines collect in the transcript.
+2. Choose your **Language** (English or Simplified Chinese).
+3. Click **Start**. In the desktop app this captures your mic *and* everything
+   playing on your computer; in a browser it captures the microphone.
+4. Words appear live in the transcript as they're recognized.
 5. Use **Copy**, **Export**, or **Clear** at any time.
 
-### Transcribe a recorded file (no microphone)
+### Transcribe a recorded file
 
-Want to caption an interview you already recorded, or a meeting video?
+Want to caption an interview or meeting you already recorded?
 
 1. Pick the **Language** of the recording.
 2. Click **📁 File** and choose an audio or video file.
 3. **The first time only**, a small speech-recognition model (**Whisper**, ~40 MB)
-   downloads to your browser and is then **cached permanently** — every later
-   transcription skips the download and starts immediately.
-4. When it finishes, every segment drops into the transcript with its timecode,
-   translated automatically. Use **Copy** / **Export** as usual.
+   downloads and is then **cached permanently** — every later transcription starts
+   immediately.
+4. When it finishes, every segment drops into the transcript with its timecode.
+   Use **Copy** / **Export** as usual.
 
 The model download and the transcription both run in a **background thread**
 (a Web Worker), so the page stays responsive the whole time — no freezing — and
@@ -92,14 +93,13 @@ somewhere the first time:
 > of the box. (Remove the `models/**` rule in `.gitignore` if you want to commit the
 > weights into your own fork.)
 
-### Translation & transcript lines — how they work
+### About the transcript
 
-- **Translation** is automatic and applied per finalized line. The direction
-  follows the selected language: English is translated to Chinese, Chinese to
-  English. No toggle — it just happens.
-- **One line per utterance.** The transcript separates content by line breaks;
-  there are no speaker labels. (The browser/Whisper pipeline can't reliably tell
-  voices apart, so manual speaker tagging isn't worth the friction.)
+- **One line per utterance**, separated by line breaks — no speaker labels, no
+  translation lines. The transcript stays in the language you selected, clean and
+  fast.
+- The **still-being-spoken** text shows as a dimmed line at the bottom and is
+  replaced by the finalized line on a pause.
 
 ### Run it
 
@@ -134,9 +134,9 @@ npm install      # installs Electron
 npm start        # launches the desktop app
 ```
 
-Then click **🔊 System audio**, and Meeting Solo transcribes whatever is playing
-on your computer — a Telegram call, a Lark meeting, a video — into the transcript,
-with the same automatic translation, copy and export.
+Then click **Start**, and Meeting Solo transcribes both your microphone and
+whatever is playing on your computer — a Telegram call, a Lark meeting, a video —
+into the transcript, with the same copy and export.
 
 ### Build an installer
 
@@ -154,17 +154,19 @@ for that release. **The CI installer bundles the Whisper model**, so it works
 
 ### Live transcription niceties
 
-- **Live preview** — while you speak, an evolving draft of the current sentence
-  shows in the caption bar; the finished line drops into the transcript on a pause.
+- **Live in the transcript** — while you speak, an evolving draft of the current
+  line shows dimmed at the bottom of the transcript and finalizes on a pause.
 - **Hallucination guard** — Whisper sometimes repeats a phrase on music or
   near-silence (e.g. "字幕: 字幕: …"); repeated runs are automatically collapsed.
 
 ### How it works & platform notes
 
-- In the desktop app, live audio (both the **microphone** and **system audio**) is
-  transcribed with **Whisper** — the same on-device engine as file mode — because
-  the browser's Web Speech API isn't available in Electron. Audio is segmented on
-  natural pauses and each segment is transcribed in the background worker.
+- In the desktop app, **Start** captures the **microphone** and the **system
+  (loopback) audio** together, mixes them, and transcribes with **Whisper** — the
+  same on-device engine as file mode. (The browser's Web Speech API isn't available
+  in Electron.) Audio is segmented on natural pauses and each segment is transcribed
+  in the background worker. Tip: use headphones so your speakers' output isn't also
+  picked up by the mic.
 - **Windows:** system-audio loopback capture is fully supported. ✅ (You're on
   Windows 11 — this is the target.)
 - **macOS:** depends on the OS version (ScreenCaptureKit) and may require a
@@ -197,26 +199,22 @@ So even where live captions aren't supported, **file transcription still works**
 Meeting Solo has **no backend of its own** and stores your transcript only in your
 browser (localStorage). Here's where data goes for each feature:
 
-- **📁 File transcription — fully on-device.** The Whisper model runs in your browser
-  via WebAssembly; the audio/video file is decoded and transcribed locally and is
-  **never uploaded**. (The one-time model download comes from a public CDN.)
-- **Live microphone captions** — the Web Speech API in Chrome/Edge sends microphone
-  audio to the browser vendor's speech service to turn it into text. This is how the
-  browser's built-in speech recognition works everywhere.
-- **Translation** — each finalized line of text is sent to a public translation
-  service (Google Translate's free endpoint, with MyMemory as a fallback) and the
-  translation is sent back. This is the one feature that sends transcript text off
-  your device. (Note: Google Translate is blocked in some regions; the MyMemory
-  fallback is used automatically, and if both are unreachable the line simply shows
-  "translation unavailable" while the original transcript is unaffected.)
+- **Desktop app — fully on-device.** File transcription *and* live capture run
+  Whisper locally via WebAssembly; audio is transcribed on your machine and is
+  **never uploaded**. (With the CI installer, even the model is bundled — nothing
+  leaves your device.)
+- **Live microphone captions in a browser** — the Web Speech API in Chrome/Edge
+  sends microphone audio to the browser vendor's speech service to turn it into
+  text. This is how the browser's built-in speech recognition works everywhere.
+  (The desktop app doesn't use this — it uses local Whisper instead.)
 
 ## Project structure
 
 ```
 index.html              — markup & layout
 styles.css              — theme-aware styling (light/dark)
-app.js                  — live recognition, transcript, translation, export, UI
-worker.js               — background thread that runs Whisper for file transcription
+app.js                  — capture, transcript, live preview, export, UI
+worker.js               — background thread that runs Whisper
 vendor/transformers/    — self-hosted transformers.js library + ONNX-Runtime WASM
 models/                 — local Whisper weights (fetch with scripts/fetch-model.sh)
 scripts/fetch-model.sh  — one-command model download (mirror-friendly)
@@ -229,7 +227,7 @@ package.json            — Electron dependencies & build config
 - Sync the file transcript with a video player (click a line to jump to that moment)
 - Larger Whisper model option for higher accuracy on tough audio
 - Export to Markdown, `.srt`, and `.vtt`
-- Show the translation live in the caption bar as you speak
+- Optional on-demand translation (kept off by default for speed)
 
 ## License
 

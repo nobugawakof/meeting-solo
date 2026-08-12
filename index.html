@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Meeting Solo — Live Captions, Translation &amp; Transcript</title>
-  <meta name="description" content="Real-time live captions with English⇄Chinese translation and speaker labels. Copyable, persistent transcripts for interviews and meetings." />
+  <title>Meeting Solo — Live Captions &amp; Transcript</title>
+  <meta name="description" content="Real-time live captions and copyable, persistent transcripts for interviews and meetings. Captures your mic and system audio from any app." />
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>" />
 </head>
@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true">🎙️</span>
       <div class="brand-text">
         <h1>Meeting Solo</h1>
-        <p>Live captions, translation &amp; transcript for interviews and meetings</p>
+        <p>Live captions &amp; transcript for interviews and meetings</p>
       </div>
     </div>
     <div class="status" id="status">
@@ -26,19 +26,15 @@
   <main class="app-main">
     <!-- Controls -->
     <section class="controls" aria-label="Controls">
-      <button id="recordBtn" class="btn btn-primary" type="button">
+      <button id="recordBtn" class="btn btn-primary" type="button" title="Capture and transcribe everything — your mic and any app's audio (Meet, Lark, Telegram, Zoom, media players)">
         <span class="btn-icon" aria-hidden="true">●</span>
         <span id="recordBtnLabel">Start</span>
       </button>
 
-      <button id="fileBtn" class="btn" type="button" title="Transcribe a recorded audio or video file — no microphone needed">
+      <button id="fileBtn" class="btn" type="button" title="Transcribe a recorded audio or video file">
         <span aria-hidden="true">📁</span> File
       </button>
       <input id="fileInput" type="file" accept="audio/*,video/*" hidden />
-
-      <button id="sysAudioBtn" class="btn" type="button" hidden title="Capture system audio from any app (Telegram, Lark, meetings) — desktop app only">
-        <span aria-hidden="true">🔊</span> <span id="sysAudioLabel">System audio</span>
-      </button>
 
       <label class="field">
         <span class="field-label">Language</span>
@@ -69,13 +65,6 @@
       <div class="fp-bar"><div id="fpFill" class="fp-fill"></div></div>
     </section>
 
-    <!-- Live caption bar -->
-    <section class="caption-bar" aria-label="Live caption" aria-live="polite">
-      <p id="liveCaption" class="caption-text caption-placeholder">
-        Press <strong>Start</strong> and begin speaking — your words appear here in real time.
-      </p>
-    </section>
-
     <!-- Transcript -->
     <section class="transcript-wrap" aria-label="Full transcript">
       <div class="transcript-head">
@@ -88,13 +77,13 @@
     <!-- Unsupported browser notice -->
     <div id="unsupported" class="notice notice-error" hidden>
       <strong>Live microphone captions aren't available in this browser.</strong>
-      For live captions, use <b>Google Chrome</b> or <b>Microsoft Edge</b> on desktop or Android.
+      For live captions, use <b>Google Chrome</b> or <b>Microsoft Edge</b> — or the desktop app.
       You can still use <b>📁 File</b> above to transcribe recorded audio or video — that works in any modern browser.
     </div>
   </main>
 
   <footer class="app-footer">
-    <span>Your transcript is saved locally in this browser. Speech recognition — and translation, when enabled — are processed by your browser's online services.</span>
+    <span>Your transcript is saved locally on this device. File transcription runs fully on-device; live microphone captions in the browser use its built-in speech service.</span>
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
