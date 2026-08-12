@@ -44,6 +44,14 @@
         </select>
       </label>
 
+      <label class="field">
+        <span class="field-label">Accuracy</span>
+        <select id="accuracySelect" class="select" title="Higher accuracy uses a larger model (slower); Fast is quicker but less accurate">
+          <option value="high">High</option>
+          <option value="fast">Fast</option>
+        </select>
+      </label>
+
       <div class="controls-spacer"></div>
 
       <label class="toggle" title="Add a timestamp to each new line">
@@ -88,6 +96,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+  <!-- OpenCC: convert Whisper's Traditional Chinese output to Simplified -->
+  <script src="vendor/opencc/t2cn.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@
  * mirror that is reachable worldwide (including mainland China) and then cached
  * by the browser. Configure the mirror with MODEL_HOST below.
  *
- * Messages IN:  { type: "transcribe", audio: Float32Array, language: string }
+ * Messages IN:  { type: "transcribe", audio: Float32Array, language: string, model: string }
  * Messages OUT: { type: "progress", data }   // model download / load progress
  *               { type: "ready" }             // model loaded, transcription starting
  *               { type: "result", result }    // { text, chunks: [{ timestamp, text }] }
@@ -25,7 +25,7 @@ import { pipeline, env } from "./vendor/transformers/transformers.min.js";
 // huggingface.co is blocked/slow (e.g. mainland China). Swap for
 // "https://huggingface.co" if you prefer the origin.
 const MODEL_HOST = "https://hf-mirror.com";
-const MODEL = "Xenova/whisper-base";
+const DEFAULT_MODEL = "Xenova/whisper-small";
 
 // Serve the ONNX-Runtime WASM from this project instead of a CDN.
 env.backends.onnx.wasm.wasmPaths = new URL("./vendor/transformers/", self.location).href;
@@ -38,19 +38,24 @@ env.localModelPath = new URL("./models/", self.location).href;
 env.allowRemoteModels = true;
 env.remoteHost = MODEL_HOST;
 
-let transcriber = null;
+// One cached pipeline per model id (base / small), so switching accuracy is cheap.
+const transcribers = {};
+async function getTranscriber(modelId) {
+  if (!transcribers[modelId]) {
+    transcribers[modelId] = await pipeline("automatic-speech-recognition", modelId, {
+      quantized: true,
+      progress_callback: (p) => self.postMessage({ type: "progress", data: p }),
+    });
+  }
+  return transcribers[modelId];
+}
 
 self.addEventListener("message", async (event) => {
   const msg = event.data || {};
   if (msg.type !== "transcribe") return;
 
   try {
-    if (!transcriber) {
-      transcriber = await pipeline("automatic-speech-recognition", MODEL, {
-        quantized: true,
-        progress_callback: (p) => self.postMessage({ type: "progress", data: p }),
-      });
-    }
+    const transcriber = await getTranscriber(msg.model || DEFAULT_MODEL);
     self.postMessage({ type: "ready" });
 
     const result = await transcriber(msg.audio, {

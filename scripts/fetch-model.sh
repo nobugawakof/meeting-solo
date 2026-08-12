@@ -14,7 +14,9 @@
 set -euo pipefail
 
 HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-MODEL="${MODEL:-Xenova/whisper-base}"
+# whisper-small is the default (High accuracy). Use MODEL=Xenova/whisper-base for
+# the Fast option, or a bigger model like Xenova/whisper-medium for best accuracy.
+MODEL="${MODEL:-Xenova/whisper-small}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

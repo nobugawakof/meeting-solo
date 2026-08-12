@@ -25,6 +25,7 @@
     fpFill: document.getElementById("fpFill"),
     fpCancel: document.getElementById("fpCancel"),
     langSelect: document.getElementById("langSelect"),
+    accuracySelect: document.getElementById("accuracySelect"),
     timestampToggle: document.getElementById("timestampToggle"),
     copyBtn: document.getElementById("copyBtn"),
     exportBtn: document.getElementById("exportBtn"),
@@ -53,6 +54,8 @@
   let processingFile = false;
 
   const IS_DESKTOP = !!(window.meetingSoloDesktop);
+  const FAST_MODEL = "Xenova/whisper-base";   // smaller, faster, less accurate
+  const HIGH_MODEL = "Xenova/whisper-small";  // larger, more accurate (esp. Chinese)
   const STREAM_SR = 16000;
   const SILENCE_RMS = 0.008;
   const SILENCE_HOLD_MS = 550;
@@ -76,6 +79,26 @@
     return String(text).replace(/(.{1,20}?)\1{2,}/gs, "$1").trim();
   }
 
+  function currentModel() {
+    return el.accuracySelect && el.accuracySelect.value === "fast" ? FAST_MODEL : HIGH_MODEL;
+  }
+
+  // Whisper emits Traditional Chinese even when Simplified is selected; convert it.
+  let t2s = null;
+  function toSimplified(text) {
+    if (!text) return text;
+    if (el.langSelect.value.toLowerCase().indexOf("zh") !== 0) return text; // only for Chinese
+    if (!t2s && window.OpenCC && window.OpenCC.Converter) {
+      try { t2s = window.OpenCC.Converter({ from: "t", to: "cn" }); } catch (_) { t2s = null; }
+    }
+    if (!t2s) return text;
+    try { return t2s(text); } catch (_) { return text; }
+  }
+
+  function cleanText(text) {
+    return toSimplified(collapseRepeats((text || "").trim()));
+  }
+
   // ---------------------------------------------------------------------------
   // Persistence
   // ---------------------------------------------------------------------------
@@ -96,6 +119,7 @@
     try {
       const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
       if (prefs.lang) el.langSelect.value = prefs.lang;
+      if (prefs.accuracy) el.accuracySelect.value = prefs.accuracy;
       if (typeof prefs.timestamps === "boolean") el.timestampToggle.checked = prefs.timestamps;
     } catch (_) {}
   }
@@ -111,6 +135,7 @@
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         lang: el.langSelect.value,
+        accuracy: el.accuracySelect.value,
         timestamps: el.timestampToggle.checked,
       }));
     } catch (_) {}
@@ -178,7 +203,7 @@
   // The live, still-being-spoken text shows as a transient dimmed line at the
   // bottom of the transcript, then is replaced by the finalized line.
   function setInterim(text) {
-    const clean = collapseRepeats((text || "").trim());
+    const clean = cleanText(text);
     if (!clean) { clearInterim(); return; }
     const wasNear = nearBottom();
     if (!interimNode) {
@@ -201,7 +226,7 @@
   }
 
   function appendLine(text) {
-    const clean = collapseRepeats((text || "").trim());
+    const clean = cleanText(text);
     if (!clean) return;
     const line = { time: nowLabel(), text: clean, lang: el.langSelect.value };
     const wasNear = nearBottom();
@@ -362,7 +387,7 @@
     return whisperWorker;
   }
 
-  function transcribeInWorker(audio, language, onProgress, onReady) {
+  function transcribeInWorker(audio, language, model, onProgress, onReady) {
     return new Promise((resolve, reject) => {
       const w = getWorker();
       const cleanup = () => {
@@ -383,7 +408,7 @@
       };
       w.addEventListener("message", handler);
       w.addEventListener("error", errHandler);
-      w.postMessage({ type: "transcribe", audio: audio, language: language }, [audio.buffer]);
+      w.postMessage({ type: "transcribe", audio: audio, language: language, model: model }, [audio.buffer]);
     });
   }
 
@@ -408,7 +433,7 @@
   function addFileLines(chunks) {
     let added = 0;
     for (const c of chunks) {
-      const text = collapseRepeats((c.text || "").trim());
+      const text = cleanText(c.text);
       if (!text) continue;
       const start = c.timestamp && c.timestamp[0] != null ? c.timestamp[0] : 0;
       lines.push({ time: secondsToLabel(start), text: text, lang: el.langSelect.value });
@@ -454,7 +479,7 @@
         setFpText(`Transcribing “${file.name}” (~${mins} min of audio)…`);
       };
 
-      const result = await transcribeInWorker(audio, whisperLang(el.langSelect.value), onProgress, onReady);
+      const result = await transcribeInWorker(audio, whisperLang(el.langSelect.value), currentModel(), onProgress, onReady);
       if (cancelled()) return;
 
       const chunks = result && result.chunks && result.chunks.length
@@ -597,7 +622,7 @@
       workerBusy = true;
       const seg = segQueue.shift();
       try {
-        const result = await transcribeInWorker(seg, whisperLang(el.langSelect.value), function () {}, function () {});
+        const result = await transcribeInWorker(seg, whisperLang(el.langSelect.value), currentModel(), function () {}, function () {});
         const txt = resultText(result);
         if (txt.trim()) appendLine(txt);
       } catch (_) {}
@@ -606,7 +631,9 @@
       return;
     }
 
-    if (!streaming) return;
+    // Live interim previews add extra work; only run them with the Fast model so
+    // the accurate model isn't slowed down (finalized lines still update on pauses).
+    if (!streaming || currentModel() !== FAST_MODEL) return;
     const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
     const bufferedMs = (pcmLen / STREAM_SR) * 1000;
     if (voicedMs >= INTERIM_MIN_MS && bufferedMs >= INTERIM_MIN_MS &&
@@ -615,8 +642,8 @@
       workerBusy = true;
       const snap = snapshotPcm();
       try {
-        const result = await transcribeInWorker(snap, whisperLang(el.langSelect.value), function () {}, function () {});
-        const clean = collapseRepeats(resultText(result).trim());
+        const result = await transcribeInWorker(snap, whisperLang(el.langSelect.value), currentModel(), function () {}, function () {});
+        const clean = cleanText(resultText(result));
         if (streaming && clean && !segQueue.length) setInterim(clean);
       } catch (_) {}
       workerBusy = false;
@@ -761,6 +788,7 @@
       savePrefs();
       if (recognition) recognition.lang = el.langSelect.value;
     });
+    el.accuracySelect.addEventListener("change", savePrefs);
     el.timestampToggle.addEventListener("change", function () {
       savePrefs();
       renderTranscript();

@@ -12,24 +12,26 @@ From the project root:
 bash scripts/fetch-model.sh
 ```
 
-This downloads `Xenova/whisper-base` into `models/Xenova/whisper-base/`. By
-default it pulls from **hf-mirror.com**, a HuggingFace mirror reachable
-worldwide (including mainland China). To use the HuggingFace origin instead:
+This downloads the default **`Xenova/whisper-small`** (the app's **High** accuracy
+setting) into `models/Xenova/whisper-small/`. By default it pulls from
+**hf-mirror.com**, a HuggingFace mirror reachable worldwide (including mainland
+China). To use the HuggingFace origin instead:
 
 ```bash
 HF_ENDPOINT=https://huggingface.co bash scripts/fetch-model.sh
 ```
 
-A different size (bigger = more accurate, slower, larger download):
+A different size:
 
 ```bash
-MODEL=Xenova/whisper-small bash scripts/fetch-model.sh
+MODEL=Xenova/whisper-base   bash scripts/fetch-model.sh   # the app's "Fast" setting
+MODEL=Xenova/whisper-medium bash scripts/fetch-model.sh   # even more accurate, large & slow
 ```
 
 ## What gets created
 
 ```
-models/Xenova/whisper-base/
+models/Xenova/whisper-small/
   config.json
   tokenizer.json
   tokenizer_config.json

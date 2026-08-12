@@ -31,7 +31,11 @@ It's built to fix the three frustrating limits of Windows 11 Live Captions:
 - **Full scrollable transcript** — every finalized line is kept as its own line,
   with optional timestamps.
 - **English & Simplified Chinese** — pick your language from the dropdown; the
-  transcript stays in that language.
+  transcript stays in that language. (Chinese output is always converted to
+  **Simplified** with OpenCC, since Whisper tends to emit Traditional.)
+- **Accuracy setting** — choose **High** (the `whisper-small` model, default —
+  noticeably better, especially for Chinese) or **Fast** (`whisper-base`, quicker
+  but rougher).
 - **Copy & Export** — one click to copy everything or download a text file.
 - **Persistent** — the transcript is saved locally and restored automatically.
 - **Word & line count** — including correct counting for Chinese characters.
@@ -216,6 +220,7 @@ styles.css              — theme-aware styling (light/dark)
 app.js                  — capture, transcript, live preview, export, UI
 worker.js               — background thread that runs Whisper
 vendor/transformers/    — self-hosted transformers.js library + ONNX-Runtime WASM
+vendor/opencc/          — Traditional→Simplified Chinese converter (OpenCC)
 models/                 — local Whisper weights (fetch with scripts/fetch-model.sh)
 scripts/fetch-model.sh  — one-command model download (mirror-friendly)
 electron/               — desktop app (main + preload) for system-audio capture
@@ -225,7 +230,7 @@ package.json            — Electron dependencies & build config
 ## Roadmap ideas
 
 - Sync the file transcript with a video player (click a line to jump to that moment)
-- Larger Whisper model option for higher accuracy on tough audio
+- A "Best" accuracy tier (whisper-medium) for file transcription
 - Export to Markdown, `.srt`, and `.vtt`
 - Optional on-demand translation (kept off by default for speed)
 
